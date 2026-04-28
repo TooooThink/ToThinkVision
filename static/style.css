@@ -1,0 +1,236 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #0f0f14;
+  color: #e0e0e0;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+h1 {
+  text-align: center;
+  font-size: 2em;
+  margin-bottom: 8px;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  text-align: center;
+  color: #888;
+  margin-bottom: 40px;
+}
+
+.card {
+  background: #1a1a24;
+  border: 1px solid #2a2a3a;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 1.2em;
+  color: #c4b5fd;
+}
+
+.upload-zone {
+  border: 2px dashed #3a3a5a;
+  border-radius: 8px;
+  padding: 60px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.upload-zone p {
+  margin: 8px 0 0;
+  color: #888;
+}
+
+.upload-zone .icon {
+  font-size: 3em;
+  color: #6366f1;
+}
+
+#fileInput { display: none; }
+
+.file-info {
+  display: none;
+  margin-top: 16px;
+  padding: 12px;
+  background: #12121a;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+.file-info.visible { display: flex; align-items: center; gap: 12px; }
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  color: #a0a0b0;
+}
+
+.form-group select, .form-group input {
+  width: 100%;
+  padding: 10px 12px;
+  background: #12121a;
+  border: 1px solid #2a2a3a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 0.95em;
+}
+
+.form-group select:focus, .form-group input:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  width: 100%;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+}
+
+.btn-primary:hover { opacity: 0.9; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.progress {
+  display: none;
+  margin-top: 16px;
+}
+
+.progress.visible { display: block; }
+
+.progress-bar {
+  height: 4px;
+  background: #2a2a3a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-inner {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6366f1, #a855f7);
+  transition: width 0.3s;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.progress-text {
+  margin-top: 8px;
+  font-size: 0.85em;
+  color: #888;
+  text-align: center;
+}
+
+.result {
+  display: none;
+  margin-top: 16px;
+}
+
+.result.visible { display: block; }
+
+.result-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.stat {
+  background: #12121a;
+  padding: 12px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.stat .value {
+  font-size: 1.5em;
+  font-weight: 700;
+  color: #a855f7;
+}
+
+.stat .label {
+  font-size: 0.8em;
+  color: #888;
+  margin-top: 4px;
+}
+
+.btn-download {
+  background: #059669;
+  color: white;
+}
+
+.btn-download:hover { background: #047857; }
+
+.error {
+  display: none;
+  margin-top: 16px;
+  padding: 12px;
+  background: #2d1215;
+  border: 1px solid #6b2128;
+  border-radius: 6px;
+  color: #fca5a5;
+}
+
+.error.visible { display: block; }
+
+.format-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.format-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #12121a;
+  border: 1px solid #2a2a3a;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.format-option:hover { border-color: #6366f1; }
+.format-option input { margin: 0; }
+.format-option.selected { border-color: #6366f1; background: rgba(99,102,241,0.1); }

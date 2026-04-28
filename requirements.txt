@@ -1,0 +1,35 @@
+# Core dependencies
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# Vision models
+torch==2.5.1
+torchvision==0.20.1
+transformers==4.47.1
+segment-anything==1.0
+groundingdino-py==0.4.0
+depth-anything @ git+https://github.com/LiheYoung/Depth-Anything.git
+
+# OCR
+paddlepaddle==2.6.2
+paddleocr==2.9.1
+
+# Video processing
+opencv-python==4.10.0.84
+ffmpeg-python==0.2.0
+Pillow==11.1.0
+
+# Utilities
+numpy==1.26.4
+scipy==1.14.1
+scikit-image==0.24.0
+scikit-learn==1.6.1
+einops==0.8.0
+timm==1.0.12
+
+# Testing
+pytest==8.3.4
+httpx==0.28.1

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ToThinkVision — Universal Vision Structuring Engine</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>ToThinkVision</h1>
+    <p class="subtitle">四合一通用视觉结构化引擎 — 图片/视频 → 结构化数据 → 多格式导出</p>
+
+    <div class="card">
+      <h2>1. Upload File</h2>
+      <div class="upload-zone" id="uploadZone">
+        <div class="icon">&#128247;</div>
+        <p>Drag & drop image/video here, or click to select</p>
+        <p style="font-size:0.85em;color:#666;margin-top:4px">Supports: JPG, PNG, WebP, MP4, AVI, MOV</p>
+      </div>
+      <input type="file" id="fileInput" accept="image/*,video/*">
+      <div class="file-info" id="fileInfo">
+        <span id="fileName"></span>
+        <span id="fileSize" style="color:#888"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. Export Format</h2>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="categorySelect">
+          <option value="ui">UI Design (Figma / HTML / JSON)</option>
+          <option value="game">Game Scene (Unity / UE / Collision)</option>
+          <option value="video">Video Motion (AE / Trajectory / Markers)</option>
+          <option value="embodied">Embodied AI (Robot / Pose / Action)</option>
+          <option value="universal">Universal (Full JSON)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Format</label>
+        <div class="format-grid" id="formatGrid"></div>
+      </div>
+      <div class="form-group">
+        <label>Detection Mode</label>
+        <select id="modeSelect">
+          <option value="general">General</option>
+          <option value="ui">UI Mode</option>
+          <option value="game">Game Mode</option>
+          <option value="video">Video Mode</option>
+          <option value="embodied">Embodied Mode</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <button class="btn btn-primary" id="processBtn" disabled>Process & Export</button>
+
+      <div class="progress" id="progress">
+        <div class="progress-bar"><div class="progress-bar-inner" id="progressBar"></div></div>
+        <div class="progress-text" id="progressText">Processing...</div>
+      </div>
+
+      <div class="result" id="result">
+        <div class="result-stats">
+          <div class="stat"><div class="value" id="statObjects">0</div><div class="label">Objects</div></div>
+          <div class="stat"><div class="value" id="statFrames">0</div><div class="label">Frames</div></div>
+          <div class="stat"><div class="value" id="statTime">0s</div><div class="label">Processing Time</div></div>
+        </div>
+        <button class="btn btn-download" id="downloadBtn">Download Result</button>
+      </div>
+
+      <div class="error" id="error"></div>
+    </div>
+  </div>
+
+<script>
+const FORMAT_MAP = {
+  ui: [
+    { id: 'figma_json', label: 'Figma JSON' },
+    { id: 'html_css', label: 'HTML/CSS' },
+    { id: 'ui_json', label: 'UI JSON' },
+  ],
+  game: [
+    { id: 'unity_json', label: 'Unity JSON' },
+    { id: 'ue_json', label: 'UE JSON' },
+    { id: 'collision_json', label: 'Collision Boxes' },
+  ],
+  video: [
+    { id: 'ae_keyframes', label: 'AE Keyframes' },
+    { id: 'video_trajectory', label: 'Trajectory CSV' },
+    { id: 'pr_markers', label: 'PR Markers' },
+  ],
+  embodied: [
+    { id: 'embodied_json', label: 'Embodied JSON' },
+    { id: 'robot_action', label: 'Robot Actions' },
+    { id: 'pose_csv', label: 'Pose CSV' },
+  ],
+  universal: [
+    { id: 'full_json', label: 'Full Structured JSON' },
+  ],
+};
+
+let selectedFile = null;
+let selectedFormat = 'full_json';
+let resultData = null;
+
+// Format options
+function renderFormats(category) {
+  const grid = document.getElementById('formatGrid');
+  const formats = FORMAT_MAP[category] || FORMAT_MAP.universal;
+  grid.innerHTML = '';
+  formats.forEach((fmt, i) => {
+    const label = document.createElement('label');
+    label.className = 'format-option' + (i === 0 ? ' selected' : '');
+    label.innerHTML = `<input type="radio" name="format" value="${fmt.id}" ${i === 0 ? 'checked' : ''}> ${fmt.label}`;
+    label.querySelector('input').addEventListener('change', () => {
+      document.querySelectorAll('.format-option').forEach(el => el.classList.remove('selected'));
+      label.classList.add('selected');
+      selectedFormat = fmt.id;
+    });
+    grid.appendChild(label);
+  });
+  if (formats.length > 0) selectedFormat = formats[0].id;
+}
+
+document.getElementById('categorySelect').addEventListener('change', (e) => {
+  renderFormats(e.target.value);
+});
+renderFormats('universal');
+
+// File upload
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+function handleFile(file) {
+  selectedFile = file;
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileSize').textContent = formatSize(file.size);
+  document.getElementById('fileInfo').classList.add('visible');
+  document.getElementById('processBtn').disabled = false;
+  hideError();
+  hideResult();
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// Process
+document.getElementById('processBtn').addEventListener('click', async () => {
+  if (!selectedFile) return;
+
+  const btn = document.getElementById('processBtn');
+  btn.disabled = true;
+  showProgress('Uploading and processing...');
+  hideError();
+  hideResult();
+
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+  formData.append('export_format', selectedFormat);
+  formData.append('mode', document.getElementById('modeSelect').value);
+
+  try {
+    const resp = await fetch('/api/process', { method: 'POST', body: formData });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'Processing failed');
+    }
+    resultData = await resp.json();
+    showResult(resultData);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    btn.disabled = false;
+    hideProgress();
+  }
+});
+
+function showProgress(text) {
+  const el = document.getElementById('progress');
+  el.classList.add('visible');
+  document.getElementById('progressText').textContent = text;
+  document.getElementById('progressBar').style.width = '100%';
+}
+function hideProgress() {
+  document.getElementById('progress').classList.remove('visible');
+}
+
+function showResult(data) {
+  document.getElementById('statObjects').textContent = data.objects_found;
+  document.getElementById('statFrames').textContent = data.frames_processed;
+  document.getElementById('statTime').textContent = data.processing_time + 's';
+  document.getElementById('result').classList.add('visible');
+}
+function hideResult() {
+  document.getElementById('result').classList.remove('visible');
+}
+
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+function hideError() {
+  document.getElementById('error').classList.remove('visible');
+}
+
+// Download
+document.getElementById('downloadBtn').addEventListener('click', async () => {
+  if (!resultData) return;
+  try {
+    const resp = await fetch(`/api/download/${resultData.output_file}`);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = resultData.output_file;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showError('Download failed: ' + err.message);
+  }
+});
+</script>
+</body>
+</html>
