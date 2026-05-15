@@ -1,0 +1,57 @@
+{
+  "format": "robot_action",
+  "source": "test_game.png",
+  "actions": [
+    {
+      "action_id": "act_0000",
+      "action_type": "approach",
+      "target_id": "obj_0000",
+      "target_label": "game_floor",
+      "timestamp": 0.0,
+      "frame": 0,
+      "end_effector_pose": {
+        "position": {
+          "x": 9.6,
+          "y": 9.4,
+          "z": 0.11
+        },
+        "orientation": {
+          "w": 1.0,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "gripper_open": true,
+      "force_limit": 10.0,
+      "speed": 0.1
+    },
+    {
+      "action_id": "act_0001",
+      "action_type": "approach",
+      "target_id": "obj_0001",
+      "target_label": "Merchant",
+      "timestamp": 0.0,
+      "frame": 0,
+      "end_effector_pose": {
+        "position": {
+          "x": 4.3,
+          "y": 3.5,
+          "z": 0.135
+        },
+        "orientation": {
+          "w": 1.0,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "gripper_open": true,
+      "force_limit": 10.0,
+      "speed": 0.1
+    }
+  ],
+  "action_count": 2,
+  "total_duration": 0,
+  "frame_rate": 30.0
+}

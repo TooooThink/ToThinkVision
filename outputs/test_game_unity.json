@@ -1,0 +1,97 @@
+{
+  "format": "unity_json",
+  "version": "2022.3",
+  "scene_name": "test_game",
+  "dimensions": {
+    "width": 1920,
+    "height": 1080
+  },
+  "game_objects": [
+    {
+      "name": "game_floor",
+      "id": "obj_0000",
+      "tag": "Ground",
+      "layer": "Ground",
+      "transform": {
+        "position": {
+          "x": 9.6,
+          "y": 9.4,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 19.2,
+          "y": 2.8,
+          "z": 1.0
+        }
+      },
+      "components": [
+        {
+          "type": "BoxCollider2D",
+          "isTrigger": false,
+          "size": {
+            "x": 19.2,
+            "y": 2.8
+          },
+          "offset": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "Merchant",
+      "id": "obj_0001",
+      "tag": "NPC",
+      "layer": "Characters",
+      "transform": {
+        "position": {
+          "x": 4.3,
+          "y": 3.5,
+          "z": 3.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 0.6,
+          "y": 1.0,
+          "z": 1.0
+        }
+      },
+      "components": [
+        {
+          "type": "BoxCollider2D",
+          "isTrigger": false,
+          "size": {
+            "x": 0.6,
+            "y": 1.0
+          },
+          "offset": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "type": "Rigidbody2D",
+          "bodyType": "Dynamic"
+        }
+      ]
+    }
+  ],
+  "scene_3d": null,
+  "physics_settings": {
+    "gravity": {
+      "x": 0,
+      "y": -9.81
+    },
+    "pixels_per_unit": 100
+  }
+}

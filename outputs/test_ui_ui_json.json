@@ -1,0 +1,45 @@
+{
+  "source": "test_ui.png",
+  "format": "ui_json",
+  "dimensions": {
+    "width": 0,
+    "height": 0
+  },
+  "components": [
+    {
+      "id": "obj_0000",
+      "type": "ui_button",
+      "custom_label": "Submit Button",
+      "bbox": {
+        "x": 100.0,
+        "y": 200.0,
+        "width": 120.0,
+        "height": 40.0
+      },
+      "z_index": 5,
+      "color": "#3b82f6",
+      "text": "Submit",
+      "interaction": "clickable",
+      "parent_id": null,
+      "confidence": 0.92
+    },
+    {
+      "id": "obj_0001",
+      "type": "ui_text",
+      "custom_label": "Title",
+      "bbox": {
+        "x": 50.0,
+        "y": 30.0,
+        "width": 300.0,
+        "height": 45.0
+      },
+      "z_index": 10,
+      "color": "#1f2937",
+      "text": "Welcome Page",
+      "interaction": "none",
+      "parent_id": null,
+      "confidence": 0.88
+    }
+  ],
+  "component_count": 2
+}

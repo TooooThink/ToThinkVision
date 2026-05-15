@@ -1,4 +1,4 @@
-"""Module 2: Game Scene Exporter — converts structured game objects to Unity/UE formats."""
+"""Module 2: Game Scene Exporter — v2 with 3D point cloud and mesh support."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from app.schemas import StructuredOutput, ExportFormat
 
 
 class GameExporter(BaseExporter):
-    """Exports game scene structured data to Unity, UE, and collision box formats."""
+    """Exports game scene structured data to Unity, UE, and collision formats."""
 
     def __init__(self, fmt: ExportFormat = ExportFormat.UNITY_JSON):
         self.fmt = fmt
@@ -29,7 +29,7 @@ class GameExporter(BaseExporter):
             return self._export_collision(data)
 
     def _export_unity(self, data: StructuredOutput) -> Path:
-        """Export as Unity-importable JSON (prefab-like structure)."""
+        """Export as Unity-importable JSON."""
         game_objects = []
         for obj in data.objects:
             unity_obj = {
@@ -53,23 +53,20 @@ class GameExporter(BaseExporter):
                 "components": [],
             }
 
-            # Collider component
             if obj.relations.collision_with or obj.label.value.startswith("game_"):
                 unity_obj["components"].append({
-                    "type": "BoxCollider2D" if obj.bbox.w > 0 and obj.bbox.h > 0 else "PolygonCollider2D",
+                    "type": "BoxCollider2D",
                     "isTrigger": obj.label.value in ("game_door", "game_effect"),
                     "size": {"x": self._to_unity_coord(obj.bbox.w), "y": self._to_unity_coord(obj.bbox.h)},
                     "offset": {"x": 0, "y": 0},
                 })
 
-            # Renderer component
             if obj.dominant_color:
                 unity_obj["components"].append({
                     "type": "SpriteRenderer",
                     "color": obj.dominant_color,
                 })
 
-            # Rigidbody for dynamic objects
             if obj.label.value in ("game_npc", "game_item", "game_prop"):
                 unity_obj["components"].append({
                     "type": "Rigidbody2D",
@@ -77,6 +74,17 @@ class GameExporter(BaseExporter):
                 })
 
             game_objects.append(unity_obj)
+
+        # Add 3D point cloud data if available
+        scene_3d = None
+        if data.point_cloud:
+            scene_3d = {
+                "point_cloud": {
+                    "count": len(data.point_cloud.points),
+                    "bounds": self._compute_bounds(data.point_cloud.points),
+                },
+                "camera_poses": len(data.camera_poses),
+            }
 
         output = {
             "format": "unity_json",
@@ -87,6 +95,7 @@ class GameExporter(BaseExporter):
                 "height": data.metadata.height if data.metadata else 1080,
             },
             "game_objects": game_objects,
+            "scene_3d": scene_3d,
             "physics_settings": {
                 "gravity": {"x": 0, "y": -9.81},
                 "pixels_per_unit": 100,
@@ -95,7 +104,7 @@ class GameExporter(BaseExporter):
         return self.save_json(output, self._output_path(data.source_file))
 
     def _export_ue(self, data: StructuredOutput) -> Path:
-        """Export as Unreal Engine compatible JSON (actor-like structure)."""
+        """Export as Unreal Engine compatible JSON."""
         actors = []
         for obj in data.objects:
             actor = {
@@ -179,32 +188,34 @@ class GameExporter(BaseExporter):
         return self.save_json(output, self._output_path(data.source_file))
 
     @staticmethod
+    def _compute_bounds(points: list) -> dict:
+        if not points:
+            return {"min": [0, 0, 0], "max": [0, 0, 0]}
+        import numpy as np
+        pts = np.array(points)
+        return {
+            "min": pts.min(axis=0).tolist(),
+            "max": pts.max(axis=0).tolist(),
+        }
+
+    @staticmethod
     def _unity_tag(obj) -> str:
         tag_map = {
-            "game_floor": "Ground",
-            "game_wall": "Wall",
-            "game_door": "Door",
-            "game_npc": "NPC",
-            "game_item": "Item",
-            "game_prop": "Prop",
-            "game_terrain": "Terrain",
-            "game_effect": "Effect",
+            "game_floor": "Ground", "game_wall": "Wall", "game_door": "Door",
+            "game_npc": "NPC", "game_item": "Item", "game_prop": "Prop",
+            "game_terrain": "Terrain", "game_effect": "Effect",
         }
         return tag_map.get(obj.label.value, "Untagged")
 
     @staticmethod
     def _unity_layer(obj) -> str:
         layer_map = {
-            "game_floor": "Ground",
-            "game_wall": "Wall",
-            "game_npc": "Characters",
-            "game_item": "Items",
-            "game_prop": "Props",
-            "game_terrain": "Terrain",
+            "game_floor": "Ground", "game_wall": "Wall",
+            "game_npc": "Characters", "game_item": "Items",
+            "game_prop": "Props", "game_terrain": "Terrain",
         }
         return layer_map.get(obj.label.value, "Default")
 
     @staticmethod
     def _to_unity_coord(val: float) -> float:
-        """Convert pixel coordinate to Unity world units (assume 100 px = 1 unit)."""
         return val / 100.0

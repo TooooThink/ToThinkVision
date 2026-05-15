@@ -1,0 +1,164 @@
+{
+  "format": "ae_keyframes",
+  "composition_name": "test_video",
+  "width": 1920,
+  "height": 1080,
+  "frame_rate": 30.0,
+  "duration_frames": 10,
+  "duration_seconds": 3.0,
+  "layers": [
+    {
+      "layer_name": "Player",
+      "layer_id": "obj_0000",
+      "type": "shape",
+      "parent": null,
+      "in_point": 0.0,
+      "out_point": 2.966666666666667,
+      "keyframes": {
+        "position": [
+          {
+            "time": 0.0,
+            "frame": 0,
+            "position": {
+              "x": 140,
+              "y": 260
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.0333,
+            "frame": 1,
+            "position": {
+              "x": 145,
+              "y": 262
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.0667,
+            "frame": 2,
+            "position": {
+              "x": 150,
+              "y": 264
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.1,
+            "frame": 3,
+            "position": {
+              "x": 155,
+              "y": 266
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.1333,
+            "frame": 4,
+            "position": {
+              "x": 160,
+              "y": 268
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.1667,
+            "frame": 5,
+            "position": {
+              "x": 165,
+              "y": 270
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.2,
+            "frame": 6,
+            "position": {
+              "x": 170,
+              "y": 272
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.2333,
+            "frame": 7,
+            "position": {
+              "x": 175,
+              "y": 274
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.2667,
+            "frame": 8,
+            "position": {
+              "x": 180,
+              "y": 276
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          },
+          {
+            "time": 0.3,
+            "frame": 9,
+            "position": {
+              "x": 185,
+              "y": 278
+            },
+            "scale": {
+              "x": 100,
+              "y": 100
+            },
+            "rotation": 0,
+            "opacity": 100
+          }
+        ]
+      }
+    }
+  ],
+  "layer_count": 1
+}

@@ -3,22 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ToThinkVision — Universal Vision Structuring Engine</title>
+  <title>ToThinkVision v2 — Universal Vision Structuring Engine</title>
   <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .model-section { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+    .model-toggle { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #1a1a2e; border: 1px solid #333; border-radius: 8px; cursor: pointer; transition: border-color 0.2s; }
+    .model-toggle:hover { border-color: #666; }
+    .model-toggle input[type=checkbox] { accent-color: #8b5cf6; width: 16px; height: 16px; }
+    .model-toggle .model-info { flex: 1; }
+    .model-toggle .model-name { font-size: 0.85em; font-weight: 600; }
+    .model-toggle .model-desc { font-size: 0.72em; color: #888; }
+    .format-option { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85em; }
+    .format-option:hover { border-color: #666; }
+    .format-option.selected { border-color: #8b5cf6; background: #1f1f3a; }
+    .format-option input[type=checkbox] { accent-color: #8b5cf6; width: 14px; height: 14px; }
+    .format-section { margin-bottom: 12px; }
+    .format-section h4 { margin: 0 0 6px; font-size: 0.8em; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .format-section .format-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; }
+    .btn-all { padding: 4px 10px; font-size: 0.75em; background: #2d2d5e; border: 1px solid #444; border-radius: 4px; color: #ccc; cursor: pointer; }
+    .btn-all:hover { background: #3d3d7e; }
+    .export-list { margin-top: 12px; }
+    .export-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; margin-bottom: 4px; }
+    .export-item a { color: #8b5cf6; text-decoration: none; font-size: 0.85em; }
+    .export-item a:hover { text-decoration: underline; }
+  </style>
 </head>
 <body>
   <div class="container">
-    <h1>ToThinkVision</h1>
+    <h1>ToThinkVision v2</h1>
     <p class="subtitle">四合一通用视觉结构化引擎 — 图片/视频 → 结构化数据 → 多格式导出</p>
 
     <div class="card">
-      <h2>1. Upload File</h2>
+      <h2>1. 上传文件</h2>
       <div class="upload-zone" id="uploadZone">
         <div class="icon">&#128247;</div>
-        <p>Drag & drop image/video here, or click to select</p>
-        <p style="font-size:0.85em;color:#666;margin-top:4px">Supports: JPG, PNG, WebP, MP4, AVI, MOV</p>
+        <p>拖拽或点击选择图片/视频</p>
+        <p style="font-size:0.85em;color:#666;margin-top:4px">支持: JPG, PNG, WebP, MP4, AVI, MOV</p>
       </div>
-      <input type="file" id="fileInput" accept="image/*,video/*">
+      <input type="file" id="fileInput" accept="image/*,video/*" style="display:none">
       <div class="file-info" id="fileInfo">
         <span id="fileName"></span>
         <span id="fileSize" style="color:#888"></span>
@@ -26,48 +48,62 @@
     </div>
 
     <div class="card">
-      <h2>2. Export Format</h2>
-      <div class="form-group">
-        <label>Category</label>
-        <select id="categorySelect">
-          <option value="ui">UI Design (Figma / HTML / JSON)</option>
-          <option value="game">Game Scene (Unity / UE / Collision)</option>
-          <option value="video">Video Motion (AE / Trajectory / Markers)</option>
-          <option value="embodied">Embodied AI (Robot / Pose / Action)</option>
-          <option value="universal">Universal (Full JSON)</option>
-        </select>
+      <h2>2. 选择分析模型</h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <button class="btn-all" id="selectAllModels">全选</button>
+        <button class="btn-all" id="selectNoModels">全不选</button>
+        <span style="font-size:0.75em;color:#888;margin-left:8px">默认全部开启，可自由关闭以节省显存</span>
       </div>
-      <div class="form-group">
-        <label>Format</label>
-        <div class="format-grid" id="formatGrid"></div>
+      <div class="model-section" id="modelSection">
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_sam3"><div class="model-info"><div class="model-name">SAM 3</div><div class="model-desc">检测+分割+追踪 · 12-24GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_omniparser"><div class="model-info"><div class="model-name">OmniParser v2</div><div class="model-desc">UI 元素检测 · 8-12GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_grounding_dino"><div class="model-info"><div class="model-name">Grounding DINO 1.6</div><div class="model-desc">开放词汇检测 · 4-8GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_strongsort"><div class="model-info"><div class="model-name">StrongSORT</div><div class="model-desc">多目标追踪 · CPU</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_depth_pro"><div class="model-info"><div class="model-name">Depth Pro</div><div class="model-desc">度量深度 · 4-8GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_mast3r"><div class="model-info"><div class="model-name">MASt3R</div><div class="model-desc">3D 点云+相机位姿 · 24-48GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" data-model="enable_gaussian_splatting"><div class="model-info"><div class="model-name">3D Gaussian Splatting</div><div class="model-desc">照片级 3D 场景 · 24GB</div></div></label>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>3. 选择导出格式</h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+        <button class="btn-all" id="selectAllFormats">全选</button>
+        <button class="btn-all" id="selectNoFormats">全不选</button>
+        <span style="font-size:0.75em;color:#888;margin-left:8px">可多选，一次导出多种格式</span>
+      </div>
+      <div id="formatsContainer"></div>
+    </div>
+
+    <div class="card">
+      <h2>4. 检测模式</h2>
       <div class="form-group">
-        <label>Detection Mode</label>
         <select id="modeSelect">
-          <option value="general">General</option>
-          <option value="ui">UI Mode</option>
-          <option value="game">Game Mode</option>
-          <option value="video">Video Mode</option>
-          <option value="embodied">Embodied Mode</option>
+          <option value="general">General — 通用</option>
+          <option value="ui">UI — 界面设计</option>
+          <option value="game">Game — 游戏场景</option>
+          <option value="video">Video — 视频动效</option>
+          <option value="embodied">Embodied — 具身智能</option>
         </select>
       </div>
     </div>
 
     <div class="card">
-      <button class="btn btn-primary" id="processBtn" disabled>Process & Export</button>
+      <button class="btn btn-primary" id="processBtn" disabled>处理并导出</button>
 
       <div class="progress" id="progress">
         <div class="progress-bar"><div class="progress-bar-inner" id="progressBar"></div></div>
-        <div class="progress-text" id="progressText">Processing...</div>
+        <div class="progress-text" id="progressText">处理中...</div>
       </div>
 
       <div class="result" id="result">
         <div class="result-stats">
-          <div class="stat"><div class="value" id="statObjects">0</div><div class="label">Objects</div></div>
-          <div class="stat"><div class="value" id="statFrames">0</div><div class="label">Frames</div></div>
-          <div class="stat"><div class="value" id="statTime">0s</div><div class="label">Processing Time</div></div>
+          <div class="stat"><div class="value" id="statObjects">0</div><div class="label">物体数</div></div>
+          <div class="stat"><div class="value" id="statFrames">0</div><div class="label">帧数</div></div>
+          <div class="stat"><div class="value" id="statTime">0s</div><div class="label">处理时间</div></div>
+          <div class="stat"><div class="value" id="statPoints">0</div><div class="label">点云数</div></div>
         </div>
-        <button class="btn btn-download" id="downloadBtn">Download Result</button>
+        <div id="exportList" class="export-list"></div>
       </div>
 
       <div class="error" id="error"></div>
@@ -75,21 +111,29 @@
   </div>
 
 <script>
-const FORMAT_MAP = {
+const ALL_FORMATS = {
   ui: [
     { id: 'figma_json', label: 'Figma JSON' },
     { id: 'html_css', label: 'HTML/CSS' },
     { id: 'ui_json', label: 'UI JSON' },
   ],
-  game: [
-    { id: 'unity_json', label: 'Unity JSON' },
-    { id: 'ue_json', label: 'UE JSON' },
-    { id: 'collision_json', label: 'Collision Boxes' },
+  game_3d: [
+    { id: 'unity_splat', label: 'Unity 3D Splat' },
+    { id: 'ue_splat', label: 'UE5 3D Splat' },
+    { id: 'gltf', label: 'glTF 3D' },
+    { id: 'obj_3d', label: 'OBJ 3D' },
+    { id: 'unity_json', label: 'Unity JSON (2D)' },
+    { id: 'ue_json', label: 'UE JSON (2D)' },
   ],
   video: [
     { id: 'ae_keyframes', label: 'AE Keyframes' },
+    { id: 'ae_project', label: 'After Effects Project' },
     { id: 'video_trajectory', label: 'Trajectory CSV' },
     { id: 'pr_markers', label: 'PR Markers' },
+  ],
+  psd: [
+    { id: 'psd_static', label: 'PSD (Static Layers)' },
+    { id: 'psd_animated', label: 'PSD (Animated Groups)' },
   ],
   embodied: [
     { id: 'embodied_json', label: 'Embodied JSON' },
@@ -102,32 +146,53 @@ const FORMAT_MAP = {
 };
 
 let selectedFile = null;
-let selectedFormat = 'full_json';
+let selectedFormats = new Set(['full_json']);
 let resultData = null;
 
-// Format options
-function renderFormats(category) {
-  const grid = document.getElementById('formatGrid');
-  const formats = FORMAT_MAP[category] || FORMAT_MAP.universal;
-  grid.innerHTML = '';
-  formats.forEach((fmt, i) => {
-    const label = document.createElement('label');
-    label.className = 'format-option' + (i === 0 ? ' selected' : '');
-    label.innerHTML = `<input type="radio" name="format" value="${fmt.id}" ${i === 0 ? 'checked' : ''}> ${fmt.label}`;
-    label.querySelector('input').addEventListener('change', () => {
-      document.querySelectorAll('.format-option').forEach(el => el.classList.remove('selected'));
-      label.classList.add('selected');
-      selectedFormat = fmt.id;
+function renderAllFormats() {
+  const container = document.getElementById('formatsContainer');
+  container.innerHTML = '';
+  for (const [section, formats] of Object.entries(ALL_FORMATS)) {
+    const sec = document.createElement('div');
+    sec.className = 'format-section';
+    const h4 = document.createElement('h4');
+    const labels = { ui: 'UI 解构', game_3d: '游戏 3D', video: '视频动效', psd: 'PSD 分层', embodied: '具身智能', universal: '通用' };
+    h4.textContent = labels[section] || section;
+    sec.appendChild(h4);
+    const grid = document.createElement('div');
+    grid.className = 'format-grid';
+    formats.forEach(fmt => {
+      const label = document.createElement('label');
+      label.className = 'format-option' + (selectedFormats.has(fmt.id) ? ' selected' : '');
+      label.innerHTML = `<input type="checkbox" data-format="${fmt.id}" ${selectedFormats.has(fmt.id) ? 'checked' : ''}> ${fmt.label}`;
+      const cb = label.querySelector('input');
+      cb.addEventListener('change', () => {
+        if (cb.checked) selectedFormats.add(fmt.id); else selectedFormats.delete(fmt.id);
+        label.classList.toggle('selected', cb.checked);
+      });
+      grid.appendChild(label);
     });
-    grid.appendChild(label);
-  });
-  if (formats.length > 0) selectedFormat = formats[0].id;
+    sec.appendChild(grid);
+    container.appendChild(sec);
+  }
 }
+renderAllFormats();
 
-document.getElementById('categorySelect').addEventListener('change', (e) => {
-  renderFormats(e.target.value);
+document.getElementById('selectAllFormats').addEventListener('click', () => {
+  for (const formats of Object.values(ALL_FORMATS)) formats.forEach(f => selectedFormats.add(f.id));
+  renderAllFormats();
 });
-renderFormats('universal');
+document.getElementById('selectNoFormats').addEventListener('click', () => {
+  selectedFormats.clear();
+  renderAllFormats();
+});
+
+document.getElementById('selectAllModels').addEventListener('click', () => {
+  document.querySelectorAll('#modelSection input[type=checkbox]').forEach(cb => cb.checked = true);
+});
+document.getElementById('selectNoModels').addEventListener('click', () => {
+  document.querySelectorAll('#modelSection input[type=checkbox]').forEach(cb => cb.checked = false);
+});
 
 // File upload
 const uploadZone = document.getElementById('uploadZone');
@@ -162,17 +227,23 @@ function formatSize(bytes) {
 // Process
 document.getElementById('processBtn').addEventListener('click', async () => {
   if (!selectedFile) return;
+  if (selectedFormats.size === 0) { showError('请至少选择一种导出格式'); return; }
 
   const btn = document.getElementById('processBtn');
   btn.disabled = true;
-  showProgress('Uploading and processing...');
+  showProgress('上传并处理中...');
   hideError();
   hideResult();
 
   const formData = new FormData();
   formData.append('file', selectedFile);
-  formData.append('export_format', selectedFormat);
+  formData.append('export_formats', JSON.stringify([...selectedFormats]));
   formData.append('mode', document.getElementById('modeSelect').value);
+
+  // Model toggles
+  document.querySelectorAll('#modelSection input[type=checkbox]').forEach(cb => {
+    formData.append(cb.dataset.model, cb.checked);
+  });
 
   try {
     const resp = await fetch('/api/process', { method: 'POST', body: formData });
@@ -204,10 +275,24 @@ function showResult(data) {
   document.getElementById('statObjects').textContent = data.objects_found;
   document.getElementById('statFrames').textContent = data.frames_processed;
   document.getElementById('statTime').textContent = data.processing_time + 's';
+  document.getElementById('statPoints').textContent = data.point_cloud_points || 0;
   document.getElementById('result').classList.add('visible');
+
+  // Show export file list with download links
+  const list = document.getElementById('exportList');
+  list.innerHTML = '';
+  if (data.exports && data.exports.length > 0) {
+    data.exports.forEach(exp => {
+      const item = document.createElement('div');
+      item.className = 'export-item';
+      item.innerHTML = `<span>${exp.format}</span><a href="/api/download/${exp.output_file}" download>下载 ${exp.output_file}</a>`;
+      list.appendChild(item);
+    });
+  }
 }
 function hideResult() {
   document.getElementById('result').classList.remove('visible');
+  document.getElementById('exportList').innerHTML = '';
 }
 
 function showError(msg) {
@@ -218,23 +303,6 @@ function showError(msg) {
 function hideError() {
   document.getElementById('error').classList.remove('visible');
 }
-
-// Download
-document.getElementById('downloadBtn').addEventListener('click', async () => {
-  if (!resultData) return;
-  try {
-    const resp = await fetch(`/api/download/${resultData.output_file}`);
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = resultData.output_file;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    showError('Download failed: ' + err.message);
-  }
-});
 </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-"""Configuration management."""
+"""Configuration — v2 all models enabled by default."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Application settings, configurable via environment variables."""
-
     # Paths
     base_dir: Path = Path(__file__).resolve().parent.parent
     upload_dir: Path = Path(__file__).resolve().parent.parent / "uploads"
@@ -24,18 +22,32 @@ class Settings(BaseSettings):
 
     # Processing
     max_video_frames: int = 300
-    frame_sample_interval: float = 0.0  # 0 = all frames; >0 = sample every N seconds
+    frame_sample_interval: float = 0.0
     device: str = "cuda"
     mock_mode: bool = os.environ.get("MOCK_MODE", "false").lower() == "true"
 
-    # Model thresholds
+    # GPU
+    gpu_memory_gb: int = int(os.environ.get("TTV_GPU_MEMORY_GB", "24"))
+    batch_size: int = 4
+
+    # Model selection (all enabled by default, mock fallback if weights missing)
+    segmentation_model: str = "sam3"
+    detection_model: str = "auto"  # omniparser for ui mode, grounding_dino for others
+    tracking_model: str = "strongsort"
+    depth_model: str = "depth_pro"
+    reconstruction_model: str = "mast3r"
+    gaussian_splatting: bool = os.environ.get("TTV_ENABLE_3DGS", "false").lower() == "true"
+
+    # Thresholds
     detection_threshold: float = 0.35
     segmentation_threshold: float = 0.5
     ocr_threshold: float = 0.4
 
-    # UI export defaults
-    html_minify: bool = True
-    figma_version: str = "v2"
+    # 3D
+    mast3r_sample_interval: int = 5  # Run MASt3R every N frames
+
+    # PSD
+    psd_max_objects_per_frame: int = 50
 
     model_config = {"env_prefix": "TTV_"}
 

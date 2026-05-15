@@ -1,0 +1,57 @@
+{
+  "format": "ue_json",
+  "version": "5.3",
+  "level_name": "test_game",
+  "actors": [
+    {
+      "ActorLabel": "game_floor",
+      "ActorId": "obj_0000",
+      "RootComponent": {
+        "Mobility": "Static",
+        "RelativeLocation": {
+          "X": 960.0,
+          "Y": 940.0,
+          "Z": 1.0
+        },
+        "RelativeScale3D": {
+          "X": 0.192,
+          "Y": 0.027999999999999997,
+          "Z": 1.0
+        }
+      },
+      "Components": [
+        {
+          "Type": "StaticMeshComponent",
+          "CollisionEnabled": "QueryAndPhysics"
+        }
+      ]
+    },
+    {
+      "ActorLabel": "Merchant",
+      "ActorId": "obj_0001",
+      "RootComponent": {
+        "Mobility": "Movable",
+        "RelativeLocation": {
+          "X": 430.0,
+          "Y": 350.0,
+          "Z": 3.5
+        },
+        "RelativeScale3D": {
+          "X": 0.006,
+          "Y": 0.01,
+          "Z": 1.0
+        }
+      },
+      "Components": [
+        {
+          "Type": "SkeletalMeshComponent",
+          "CollisionEnabled": "QueryOnly"
+        }
+      ]
+    }
+  ],
+  "world_settings": {
+    "WorldGravityZ": -980.0,
+    "DefaultFloorZ": 0.0
+  }
+}
