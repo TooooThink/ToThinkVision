@@ -1,0 +1,69 @@
+# Byte-compiled / optimized / distributed
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ToThinkVision outputs (generated per-run)
+outputs/
+uploads/
+
+# Temp dirs created during processing
+ttv_*/
+
+# Model weights (large binary files, download via install_models.sh)
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.bin
+
+# Model cache directory
+.cache/tothinkvision/
+
+# 3DGS training outputs (large)
+gs_training/
+*.splat
+
+# Local env
+.env
+.env.local
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
