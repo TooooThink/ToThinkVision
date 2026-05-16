@@ -24,12 +24,18 @@ def _get_mock_depth(img: np.ndarray) -> np.ndarray:
 
 
 class DepthPro:
-    """Wrapper for Apple Depth Pro metric depth estimation."""
+    """Wrapper for Apple Depth Pro metric depth estimation.
+
+    Supports two backends:
+    1. Official Apple depth_pro package (pip install git+https://github.com/apple/ml-depth-pro.git)
+    2. HuggingFace transformers (apple/DepthPro-hf)
+    """
 
     def __init__(self, device: str = "cuda"):
         self.device = device
         self.model = None
         self.transform = None
+        self._backend = None  # "apple" or "huggingface"
         self._init_model()
 
     def _init_model(self):
@@ -38,36 +44,34 @@ class DepthPro:
             logger.info("Depth Pro: using mock mode")
             return
 
+        # Try official Apple package first
         try:
+            import depth_pro
             import torch
 
-            # Try Apple's Depth Pro
-            depth_pro_dir = Path(settings.model_cache_dir) / "ml-depth-pro"
-            if depth_pro_dir.exists():
-                import sys
-                sys.path.insert(0, str(depth_pro_dir))
-                import depth_pro
-                self.model, self.transform = depth_pro.create_model_and_transforms()
-                self.model.eval().to(self.device)
-                logger.info("Depth Pro loaded from local repo")
-            else:
-                # Try HuggingFace
-                from transformers import AutoImageProcessor, AutoModelForDepthEstimation
-
-                processor = AutoImageProcessor.from_pretrained(
-                    "apple/depth-pro", cache_dir=settings.model_cache_dir
-                )
-                model = AutoModelForDepthEstimation.from_pretrained(
-                    "apple/depth-pro", cache_dir=settings.model_cache_dir
-                )
-                model.to(self.device)
-                self.model = model
-                self.transform = processor
-                logger.info("Depth Pro loaded from HuggingFace")
+            self.model, self.transform = depth_pro.create_model_and_transforms()
+            self.model.eval().to(self.device, dtype=torch.float32)
+            self._backend = "apple"
+            logger.info("Depth Pro loaded from official Apple package")
+            return
         except ImportError:
-            logger.warning("depth_pro not installed, falling back to mock")
+            logger.info("depth_pro package not installed, trying HuggingFace")
+
+        # Try HuggingFace transformers
+        try:
+            import torch
+            from transformers import DepthProModel, DepthProProcessor
+
+            model_id = "apple/DepthPro-hf"
+            self.processor = DepthProProcessor.from_pretrained(model_id)
+            self.model = DepthProModel.from_pretrained(model_id).to(self.device)
+            self._backend = "huggingface"
+            logger.info("Depth Pro loaded from HuggingFace (DepthPro-hf)")
+            return
         except Exception as e:
-            logger.warning(f"Depth Pro load failed: {e}")
+            logger.warning(f"HuggingFace Depth Pro load failed: {e}")
+
+        logger.warning("Depth Pro not available, falling back to mock")
 
     def estimate(self, img: np.ndarray, f_px: float | None = None) -> np.ndarray:
         """Estimate metric depth map.
@@ -88,25 +92,30 @@ class DepthPro:
             pil_img = PILImage.fromarray(img)
             h, w = img.shape[:2]
 
-            if f_px is None:
-                f_px = max(w, h)  # Default: focal length ≈ image diagonal
-
-            if hasattr(self, "transform") and callable(self.transform):
-                # Apple's Depth Pro API
+            if self._backend == "apple":
                 import torch
+
+                if f_px is None:
+                    f_px = max(w, h)  # Default: focal length ≈ image diagonal
+
                 input_tensor = self.transform(pil_img).to(self.device).unsqueeze(0)
                 with torch.no_grad():
                     prediction = self.model.infer(input_tensor, f_px=f_px)
                 depth = prediction["depth"].squeeze().cpu().numpy()
-            else:
-                # HuggingFace transformers API
+
+            elif self._backend == "huggingface":
                 import torch
-                inputs = self.transform(images=pil_img, return_tensors="pt").to(self.device)
+
+                inputs = self.processor(images=pil_img, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
                 with torch.no_grad():
                     outputs = self.model(**inputs)
                 depth = outputs.predicted_depth.squeeze().cpu().numpy()
 
-            # Interpolate to original size
+            else:
+                return _get_mock_depth(img)
+
+            # Interpolate to original size if needed
             if depth.shape != (h, w):
                 import cv2
                 depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_LINEAR)

@@ -140,6 +140,8 @@ def build_manifest_for_export(
         "psd_animated": "Photoshop PSD — each frame is a Group with object layers",
         "ae_project": "After Effects ExtendScript — run in AE to create animated composition",
         "full_json": "Complete structured data with 2D + 3D + camera + Gaussian info",
+        "gltf": "glTF 2.0 3D scene — universal format for web viewers, Blender, Unity",
+        "obj": "Wavefront OBJ 3D model — compatible with all 3D software",
     }
 
     target_map = {
@@ -152,6 +154,8 @@ def build_manifest_for_export(
         "psd_animated": "Photoshop",
         "ae_project": "After Effects",
         "full_json": "Universal",
+        "gltf": "glTF Viewer / Blender / Unity",
+        "obj": "All 3D Software",
     }
 
     desc = format_descriptions.get(export_format, export_format)

@@ -54,12 +54,17 @@ def _get_mock_segmentation(img: np.ndarray, num_objects: int = 5) -> list[dict]:
 
 
 class SAM3Predictor:
-    """Wrapper for SAM 3 image and video prediction."""
+    """Wrapper for SAM 3 image and video prediction.
+
+    Uses the official facebookresearch/sam3 API:
+    - Image: build_sam3_image_model(enable_inst_interactivity=True)
+    - Video: build_sam3_predictor(version="sam3")
+    """
 
     def __init__(self, device: str = "cuda"):
         self.device = device
-        self.image_predictor = None
-        self.video_predictor = None
+        self.image_predictor = None  # SAM3InteractiveImagePredictor
+        self.video_predictor = None  # Sam3VideoPredictorMultiGPU
         self._init_model()
 
     def _init_model(self):
@@ -68,26 +73,32 @@ class SAM3Predictor:
             logger.info("SAM 3: using mock mode")
             return
 
-        cache = Path(settings.model_cache_dir)
         try:
-            # Try SAM 3 first
-            from sam3.build_sam3 import build_sam3
-            from sam3.sam3_image_predictor import SAM3ImagePredictor
+            # Official SAM 3 API — unified entry point
+            from sam3.model_builder import build_sam3_image_model
 
-            checkpoint = cache / "sam3_hiera_large.pt"
-            if not checkpoint.exists():
-                logger.warning(f"SAM 3 checkpoint not found at {checkpoint}, falling back to mock")
+            self._model = build_sam3_image_model(
+                device=self.device,
+                load_from_HF=True,
+                enable_inst_interactivity=True,
+                enable_segmentation=True,
+            )
+
+            # Get the interactive predictor attached to the model
+            if hasattr(self._model, "inst_interactive_predictor"):
+                self.image_predictor = self._model.inst_interactive_predictor
+                logger.info("SAM 3 image predictor loaded")
+            else:
+                logger.warning("SAM 3 model loaded but interactive predictor not available")
                 return
-
-            sam3 = build_sam3("sam3_hiera_large.yaml", str(checkpoint), device=self.device)
-            self.image_predictor = SAM3ImagePredictor(sam3)
-            logger.info("SAM 3 image predictor loaded")
 
             # Try video predictor
             try:
-                from sam3.build_sam3 import build_sam3_video_predictor
+                from sam3.model_builder import build_sam3_video_predictor
+
                 self.video_predictor = build_sam3_video_predictor(
-                    "sam3_hiera_large.yaml", str(checkpoint), device=self.device
+                    device=self.device,
+                    load_from_HF=True,
                 )
                 logger.info("SAM 3 video predictor loaded")
             except Exception as e:
@@ -95,6 +106,8 @@ class SAM3Predictor:
 
         except ImportError:
             logger.warning("sam3 package not installed, falling back to mock mode")
+        except Exception as e:
+            logger.warning(f"SAM 3 init failed: {e}, falling back to mock")
 
     def predict(self, img: np.ndarray, text_prompt: str | None = None,
                 boxes: np.ndarray | None = None) -> list[dict]:
@@ -115,9 +128,10 @@ class SAM3Predictor:
             self.image_predictor.set_image(img)
 
             results = []
-            if boxes is not None:
+            if boxes is not None and len(boxes) > 0:
                 # Segment from provided boxes
                 for i, box in enumerate(boxes):
+                    # SAM 3 expects [x1, y1, x2, y2] format
                     masks, scores, _ = self.image_predictor.predict(
                         box=box, multimask_output=True
                     )
@@ -133,7 +147,7 @@ class SAM3Predictor:
                 # Use SAM 3 text-prompted segmentation
                 results = self._predict_with_text(img, text_prompt)
             else:
-                # Automatic segmentation
+                # Automatic segmentation (predict without prompts = auto mode)
                 results = self._predict_automatic(img)
 
             return results
@@ -142,18 +156,22 @@ class SAM3Predictor:
             return _get_mock_segmentation(img)
 
     def _predict_with_text(self, img: np.ndarray, text_prompt: str) -> list[dict]:
-        """Use SAM 3 text-prompted segmentation if available."""
+        """Use SAM 3 text-prompted segmentation."""
         try:
-            # SAM 3 concept-aware segmentation
-            results = self.image_predictor.predict_with_text(text_prompt)
-            return results
-        except (AttributeError, Exception):
+            # SAM 3 supports text prompts via its forward pass
+            # The interactive predictor may have a text-based predict method
+            if hasattr(self.image_predictor, "predict_with_text"):
+                results = self.image_predictor.predict_with_text(text_prompt)
+                return results
             # Fallback: use automatic segmentation
+            return self._predict_automatic(img)
+        except Exception:
             return self._predict_automatic(img)
 
     def _predict_automatic(self, img: np.ndarray) -> list[dict]:
-        """Automatic segmentation using SAM 3."""
+        """Automatic segmentation using SAM 3 without prompts."""
         try:
+            # Call predict with no prompts — returns all detected masks
             masks, scores, _ = self.image_predictor.predict(
                 multimask_output=True,
             )
@@ -178,37 +196,60 @@ class SAM3Predictor:
             return _get_mock_segmentation(img)
 
     def init_video(self, frames_dir: str | Path) -> dict | None:
-        """Initialize video tracking state."""
+        """Initialize video tracking state.
+
+        SAM 3 video uses a request-based API. We start a session here.
+        Returns session info dict or None.
+        """
         if self.video_predictor is None:
             return None
         try:
-            return self.video_predictor.init_state(video_path=str(frames_dir))
+            response = self.video_predictor.handle_request({
+                "type": "start_session",
+                "resource_path": str(frames_dir),
+            })
+            return {
+                "session_id": response["session_id"],
+                "predictor": self.video_predictor,
+            }
         except Exception as e:
             logger.error(f"SAM 3 video init failed: {e}")
             return None
 
     def add_prompt(self, inference_state, frame_idx: int, obj_id: int,
                    box: np.ndarray | None = None, points: np.ndarray | None = None,
-                   labels: np.ndarray | None = None) -> tuple | None:
-        """Add a prompt for video tracking."""
-        if self.video_predictor is None or inference_state is None:
+                   labels: np.ndarray | None = None) -> dict | None:
+        """Add a prompt for video tracking.
+
+        Args:
+            inference_state: session dict from init_video
+            frame_idx: frame index
+            obj_id: object ID
+            box: [x1, y1, x2, y2] bounding box
+            points: (N, 2) point coordinates
+            labels: (N,) point labels (1=foreground, 0=background)
+        """
+        if inference_state is None or "predictor" not in inference_state:
             return None
+        predictor = inference_state["predictor"]
+        session_id = inference_state["session_id"]
+
         try:
+            request = {
+                "type": "add_prompt",
+                "session_id": session_id,
+                "frame_index": frame_idx,
+            }
+
             if box is not None:
-                return self.video_predictor.add_new_box(
-                    inference_state=inference_state,
-                    frame_idx=frame_idx,
-                    obj_id=obj_id,
-                    box=box,
-                )
-            elif points is not None and labels is not None:
-                return self.video_predictor.add_new_points(
-                    inference_state=inference_state,
-                    frame_idx=frame_idx,
-                    obj_id=obj_id,
-                    points=points,
-                    labels=labels,
-                )
+                request["bounding_boxes"] = [box.tolist()]
+                request["bounding_box_labels"] = [1]  # 1 = foreground
+
+            if points is not None and labels is not None:
+                request["points"] = points.tolist()
+                request["point_labels"] = labels.tolist()
+
+            return predictor.handle_request(request)
         except Exception as e:
             logger.error(f"SAM 3 video add_prompt failed: {e}")
         return None
@@ -219,14 +260,35 @@ class SAM3Predictor:
         Returns:
             list of (frame_idx, obj_id, mask) tuples
         """
-        if self.video_predictor is None or inference_state is None:
+        if inference_state is None or "predictor" not in inference_state:
             return []
+        predictor = inference_state["predictor"]
+        session_id = inference_state["session_id"]
+
         try:
             results = []
-            for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(inference_state):
-                for i, obj_id in enumerate(out_obj_ids):
-                    mask = (out_mask_logits[i] > 0.0).cpu().numpy().astype(np.uint8)
-                    results.append((int(out_frame_idx), int(obj_id), mask))
+            for out in predictor.handle_stream_request({
+                "type": "propagate_in_video",
+                "session_id": session_id,
+                "propagation_direction": "both",
+            }):
+                frame_idx = out["frame_index"]
+                outputs = out.get("outputs", {})
+                masks = outputs.get("out_binary_masks", [])
+                obj_ids = outputs.get("out_obj_ids", [])
+                for i in range(len(masks)):
+                    mask = masks[i].astype(np.uint8)
+                    results.append((int(frame_idx), int(obj_ids[i]), mask))
+
+            # Clean up session
+            try:
+                predictor.handle_request({
+                    "type": "close_session",
+                    "session_id": session_id,
+                })
+            except Exception:
+                pass
+
             return results
         except Exception as e:
             logger.error(f"SAM 3 video propagation failed: {e}")

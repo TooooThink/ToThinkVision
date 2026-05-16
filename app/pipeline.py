@@ -245,12 +245,11 @@ def _process_image(file_path: Path, config: PipelineConfig) -> StructuredOutput:
 def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     """Process a video through the full v2 pipeline with 3D reconstruction."""
     start_time = time.time()
-    import tempfile
 
-    # ─── Extract frames ─────────────────────────────────────
-    with tempfile.TemporaryDirectory() as tmpdir:
-        frame_dir = Path(tmpdir) / "frames"
-        frame_paths, video_meta = extract_frames(file_path, frame_dir)
+    # ─── Extract frames (persist to output dir so MASt3R/3DGS can access) ──
+    frame_dir = settings.output_dir / f"{file_path.stem}_frames"
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    frame_paths, video_meta = extract_frames(file_path, frame_dir)
 
     metadata = VideoMetadata(
         fps=video_meta["fps"],
@@ -264,12 +263,14 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     # ─── SAM 3 Video Tracking ───────────────────────────────
     sam3 = SAM3Predictor() if config.enable_sam3 else None
     inference_state = sam3.init_video(str(frame_dir)) if sam3 else None
+    sam3_video_initialized = inference_state is not None
 
     # ─── Per-frame processing ───────────────────────────────
     tracker = get_tracker(fps=fps) if config.enable_strongsort else None
     depth_model = get_depth_model() if config.enable_depth_pro else DepthPro()
-    all_frame_objects: list[StructuredObject] = []
+    all_frame_objects: list[StructuredObject] = {}  # keyed by track_id
     frame_idx = 0
+    keyframe_objects: dict[str, dict] = {}  # track_id → segmentation for SAM 3 prompts
 
     for frame_path in frame_paths:
         img, img_info = preprocess_image(frame_path)
@@ -299,6 +300,14 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             else:
                 seg_results = []
             detections = _merge_detection_with_segmentation(detections, seg_results)
+
+            # Feed keyframe detections to SAM 3 video predictor for propagation
+            if sam3_video_initialized and detections:
+                for i, det in enumerate(detections):
+                    bbox = det["bbox"]
+                    box_xyxy = np.array([bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]])
+                    sam3.add_prompt(inference_state, frame_idx, i, box=box_xyxy)
+
         else:
             detections = []  # Use tracking for subsequent frames
 
@@ -318,29 +327,40 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             dominant_color, color_palette = extract_dominant_color(img, bbox)
             depth_val = depth_model.get_depth_at(depth_map, bbox)
 
-            obj = StructuredObject(
-                id=tid,
-                label=classify_object_type(track.get("label", "object")),
-                label_custom=track.get("label"),
-                confidence=track.get("confidence", 0.5),
-                bbox=BBox2D(x=bbox[0], y=bbox[1], w=bbox[2], h=bbox[3]),
-                depth_value=depth_val,
-                dominant_color=dominant_color,
-                color_palette=color_palette,
-                temporal=TemporalInfo(
-                    frame_index=frame_idx,
-                    appear_frame=track.get("appear_frame", frame_idx),
-                    trajectory=track.get("history", []),
-                    depth_per_frame=[depth_val],
-                ),
-            )
-            all_frame_objects.append(obj)
+            if tid in all_frame_objects:
+                # Update existing track
+                existing = all_frame_objects[tid]
+                existing.temporal.trajectory.extend(track.get("history", []))
+                existing.temporal.depth_per_frame.append(depth_val)
+                if track.get("disappear_frame", -1) >= 0:
+                    existing.temporal.disappear_frame = track["disappear_frame"]
+            else:
+                obj = StructuredObject(
+                    id=tid,
+                    label=classify_object_type(track.get("label", "object")),
+                    label_custom=track.get("label"),
+                    confidence=track.get("confidence", 0.5),
+                    bbox=BBox2D(x=bbox[0], y=bbox[1], w=bbox[2], h=bbox[3]),
+                    depth_value=depth_val,
+                    dominant_color=dominant_color,
+                    color_palette=color_palette,
+                    temporal=TemporalInfo(
+                        frame_index=frame_idx,
+                        appear_frame=track.get("appear_frame", frame_idx),
+                        disappear_frame=track.get("disappear_frame", -1),
+                        trajectory=track.get("history", []),
+                        depth_per_frame=[depth_val],
+                    ),
+                )
+                all_frame_objects[tid] = obj
 
         frame_idx += 1
 
     # ─── Propagate SAM 3 masks through video ────────────────
     if inference_state is not None:
-        sam3.propagate_video(inference_state)
+        propagation_results = sam3.propagate_video(inference_state)
+        # Merge propagated masks into tracked objects
+        _merge_propagated_masks(all_frame_objects, propagation_results)
 
     # ─── 3D Reconstruction (MASt3R) ─────────────────────────
     pc_data = {"points": [], "colors": []}
@@ -355,16 +375,8 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         gs_pipe = get_splat_pipeline()
         gs_data = gs_pipe.train(frame_dir, settings.output_dir / "gs_training")
 
-    # ─── Merge objects (keep last occurrence of each ID) ────
-    last_objects: dict[str, StructuredObject] = {}
-    for obj in all_frame_objects:
-        if obj.id in last_objects:
-            # Merge trajectory
-            last_objects[obj.id].temporal.trajectory.extend(obj.temporal.trajectory)
-            last_objects[obj.id].temporal.depth_per_frame.extend(obj.temporal.depth_per_frame)
-        last_objects[obj.id] = obj
-
-    final_objects = list(last_objects.values())
+    # ─── Merge objects (dictionary → list) ──────────────────
+    final_objects = list(all_frame_objects.values())
 
     # Compute velocity for tracked objects
     if tracker:
@@ -374,6 +386,24 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 obj.temporal.velocity = vel
 
     final_objects = _compute_relations(final_objects)
+
+    # ─── Export visual outputs ──────────────────────────────
+    img_dir = _ensure_export_dir(file_path)
+
+    # Detection overlay (last processed frame)
+    detection_png = export_detection_overlay(img, detections, img_dir, file_path.name)
+
+    # Point cloud preview
+    pc_preview = None
+    pc_points = pc_data.get("points", [])
+    if pc_points:
+        pts = np.array(pc_points)
+        pc_colors = pc_data.get("colors", [])
+        clr = np.array(pc_colors) if pc_colors and len(pc_colors) == len(pts) else None
+        pc_preview = export_point_cloud_preview(pts, clr, img_dir, file_path.name)
+
+    # Export per-object crops and masks from the last frame
+    _export_object_images(img, final_objects, img_dir)
 
     # ─── Build output ───────────────────────────────────────
     elapsed = time.time() - start_time
@@ -390,24 +420,28 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         model_versions["depth"] = "depth_pro"
     if config.enable_mast3r:
         model_versions["reconstruction"] = "mast3r"
-    model_versions["gaussian_splatting"] = "gsplat" if gs_data else "none"
+    if config.enable_gaussian_splatting and gs_data:
+        model_versions["gaussian_splatting"] = "gsplat"
 
-    # ─── Export visual outputs ──────────────────────────────
-    # For video: export from the last frame (where final_objects are from)
-    # We use the last frame's image from frame_paths
-    img_dir = _ensure_export_dir(file_path)
-
-    # Detection overlay (last processed frame)
-    detection_png = export_detection_overlay(img, detections, img_dir, file_path.name)
-
-    # Point cloud preview
-    pc_preview = None
-    pc_points = pc_data.get("points", [])
-    if pc_points:
-        pts = np.array(pc_points)
-        pc_colors = pc_data.get("colors", [])
-        clr = np.array(pc_colors) if pc_colors and len(pc_colors) == len(pts) else None
-        pc_preview = export_point_cloud_preview(pts, clr, img_dir, file_path.name)
+    # Save PLY/splat file paths if 3D data is available
+    ply_path = None
+    splat_path = None
+    if config.enable_gaussian_splatting and gs_data:
+        gs_pipe = get_splat_pipeline()
+        ply_save = settings.output_dir / f"{file_path.stem}_3dgs.ply"
+        splat_save = settings.output_dir / f"{file_path.stem}_3dgs.splat"
+        gs_pipe.export_ply(gs_data, ply_save)
+        gs_pipe.export_splat(gs_data, splat_save)
+        ply_path = str(ply_save)
+        splat_path = str(splat_save)
+    elif pc_points:
+        # Fallback: export point cloud as PLY
+        from app.utils.pointcloud import save_ply
+        ply_save = settings.output_dir / f"{file_path.stem}_pointcloud.ply"
+        pts_arr = np.array(pc_points)
+        clr_arr = np.array(pc_colors) if pc_colors and len(pc_colors) == len(pts_arr) else None
+        save_ply(ply_save, pts_arr, clr_arr)
+        ply_path = str(ply_save)
 
     output = StructuredOutput(
         source_file=file_path.name,
@@ -424,6 +458,8 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         camera_poses=[CameraPose(**pose) for pose in camera_poses],
         detection_overlay_png_path=str(detection_png) if detection_png else None,
         point_cloud_preview_png_path=str(pc_preview) if pc_preview else None,
+        ply_file_path=ply_path,
+        splat_file_path=splat_path,
     )
 
     if gs_data:
@@ -593,3 +629,36 @@ def _export_object_images(img: np.ndarray, objects: list[StructuredObject], outp
                 masked_path = export_mask_with_alpha(crop_img_obj, mask_cropped > 0, output_dir, obj_id)
                 if masked_path:
                     obj.raw_data["masked_png_path"] = str(masked_path)
+
+
+def _merge_propagated_masks(
+    objects: dict[str, StructuredObject],
+    propagation_results: list[tuple[int, int, np.ndarray]],
+):
+    """Merge SAM 3 propagated video masks into tracked objects.
+
+    Args:
+        objects: dict of track_id → StructuredObject (updated in place)
+        propagation_results: list of (frame_idx, obj_id, mask) from SAM 3
+    """
+    for frame_idx, obj_id, mask in propagation_results:
+        # Map SAM 3 obj_id to our track ID
+        track_id = f"obj_{obj_id:04d}"
+        if track_id not in objects:
+            continue
+
+        obj = objects[track_id]
+        mask_b64 = mask_to_base64(mask)
+        if mask_b64:
+            obj.mask_base64 = mask_b64
+
+        # Update bbox from mask
+        ys, xs = np.where(mask > 0)
+        if len(xs) > 0:
+            obj.bbox.x = float(xs.min())
+            obj.bbox.y = float(ys.min())
+            obj.bbox.w = float(xs.max() - xs.min())
+            obj.bbox.h = float(ys.max() - ys.min())
+
+        # Update contour
+        obj.contour = get_contour_from_mask(mask) if mask is not None else []

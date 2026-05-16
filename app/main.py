@@ -18,7 +18,9 @@ from app.config import settings
 from app.exporters.ae_project_exporter import AEProjectExporter
 from app.exporters.embodied_exporter import EmbodiedExporter
 from app.exporters.game_exporter import GameExporter
+from app.exporters.gltf_exporter import GltfExporter
 from app.exporters.manifest import build_manifest_for_export, ExportManifest
+from app.exporters.obj_exporter import ObjExporter
 from app.exporters.psd_exporter import PSDExporter
 from app.exporters.splat_exporter import SplatExporter
 from app.exporters.ui_exporter import UIExporter
@@ -52,8 +54,8 @@ EXPORT_FORMAT_MAP: dict[str, type] = {
     # Game 3D
     ExportFormat.UNITY_SPLAT: lambda: SplatExporter(ExportFormat.UNITY_SPLAT),
     ExportFormat.UE_SPLAT: lambda: SplatExporter(ExportFormat.UE_SPLAT),
-    ExportFormat.GLTF: lambda: SplatExporter(ExportFormat.GLTF),
-    ExportFormat.OBJ_3D: lambda: SplatExporter(ExportFormat.OBJ_3D),
+    ExportFormat.GLTF: lambda: GltfExporter(),
+    ExportFormat.OBJ_3D: lambda: ObjExporter(),
     ExportFormat.UNITY_JSON: lambda: GameExporter(ExportFormat.UNITY_JSON),
     ExportFormat.UE_JSON: lambda: GameExporter(ExportFormat.UE_JSON),
     ExportFormat.COLLISION_JSON: lambda: GameExporter(ExportFormat.COLLISION_JSON),
@@ -237,6 +239,12 @@ async def process_upload(
         if structured_data.splat_file_path:
             splat_path = structured_data.splat_file_path
 
+        # Add 3D files to manifest
+        if structured_data.ply_file_path:
+            manifest.add(structured_data.ply_file_path, "Point cloud PLY file (from MASt3R or 3DGS)", "Blender/Unity/All")
+        if structured_data.splat_file_path:
+            manifest.add(structured_data.splat_file_path, "3D Gaussian Splat binary (UnityGaussianSplatting)", "Unity/UE5")
+
         return {
             "status": "success",
             "source": file.filename,
@@ -249,6 +257,8 @@ async def process_upload(
             "gaussian_splats": len(structured_data.gaussian_splats.means) if structured_data.gaussian_splats else 0,
             "models_used": structured_data.model_versions,
             "exports": export_results,
+            "ply_file_path": structured_data.ply_file_path,
+            "splat_file_path": structured_data.splat_file_path,
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
