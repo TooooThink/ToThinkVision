@@ -5,59 +5,6 @@ set -e
 CACHE_DIR="${MODEL_CACHE_DIR:-$HOME/.cache/tothinkvision}"
 mkdir -p "$CACHE_DIR"
 
-# ── Git mirror detection (China-friendly) ──
-GIT_PREFIX=""
-try_mirror() {
-    local repo=$1
-    # Try direct first
-    git ls-remote --quiet "https://github.com/$repo.git" 2>/dev/null && { echo "github"; return; }
-    # Try gitee mirror
-    git ls-remote --quiet "https://gitee.com/mirrors/$repo.git" 2>/dev/null && { echo "gitee"; return; }
-    # Try ghproxy
-    git ls-remote --quiet "https://ghproxy.com/https://github.com/$repo.git" 2>/dev/null && { echo "ghproxy"; return; }
-    echo "none"
-}
-
-clone_with_mirrors() {
-    local repo=$1
-    local dest=$2
-    local mirror
-    mirror=$(try_mirror "$repo")
-    echo "  Git mirror: $mirror"
-    case $mirror in
-        github)  git clone --quiet "https://github.com/$repo.git" "$dest" ;;
-        gitee)   git clone --quiet "https://gitee.com/mirrors/$repo.git" "$dest" ;;
-        ghproxy) git clone --quiet "https://ghproxy.com/https://github.com/$repo.git" "$dest" ;;
-        *)
-            echo "  ERROR: Cannot clone $repo, all mirrors failed."
-            return 1
-            ;;
-    esac
-}
-
-pip_install_git() {
-    local repo=$1
-    local fallback=$2
-    local mirror
-    mirror=$(try_mirror "$repo")
-    echo "  Git mirror: $mirror"
-    case $mirror in
-        github)
-            pip install "git+https://github.com/$repo.git" || { [ -n "$fallback" ] && echo "$fallback" && return 1; return 1; }
-            ;;
-        gitee)
-            pip install "git+https://gitee.com/mirrors/$repo.git" || { [ -n "$fallback" ] && echo "$fallback" && return 1; return 1; }
-            ;;
-        ghproxy)
-            pip install "git+https://ghproxy.com/https://github.com/$repo.git" || { [ -n "$fallback" ] && echo "$fallback" && return 1; return 1; }
-            ;;
-        *)
-            [ -n "$fallback" ] && echo "$fallback"
-            return 1
-            ;;
-    esac
-}
-
 echo "=========================================="
 echo "  ToThinkVision v2 — Model Installer"
 echo "=========================================="
@@ -75,76 +22,73 @@ echo "  8) All models (requires ~60GB+ VRAM for all simultaneously)"
 echo ""
 read -p "Enter selection (1-8): " choice
 
-# ── pip index URL (China) ──
-PIP_INDEX="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
-
 install_sam3() {
     echo ""
     echo ">>> Installing SAM 3..."
-    pip_install_git "facebookresearch/sam3" "  SAM 3 failed, trying SAM 2 fallback..."
-    if [ $? -ne 0 ]; then
-        pip_install_git "facebookresearch/sam2" "  SAM 2 also failed. Install manually later."
-    fi
-    echo "Downloading SAM checkpoint..."
+    pip install git+https://github.com/facebookresearch/sam3.git 2>/dev/null || \
+    pip install git+https://github.com/facebookresearch/sam2.git
+    echo "SAM 3/2 installed. Downloading checkpoint..."
     wget -nc -P "$CACHE_DIR" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" 2>/dev/null || \
-    curl -L -o "$CACHE_DIR/sam2.1_hiera_large.pt" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" || \
-    echo "  Download checkpoint manually: https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
-    echo "SAM checkpoint saved to $CACHE_DIR"
+    curl -L -o "$CACHE_DIR/sam2.1_hiera_large.pt" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
+    echo "SAM 3 checkpoint saved to $CACHE_DIR"
 }
 
 install_omniparser() {
     echo ""
     echo ">>> Installing OmniParser v2..."
-    clone_with_mirrors "microsoft/OmniParser" "$CACHE_DIR/OmniParser" 2>/dev/null || \
-    echo "  OmniParser clone failed. Download weights from: https://huggingface.co/microsoft/OmniParser-v2.0"
-    cd "$CACHE_DIR/OmniParser" && pip install --index-url "$PIP_INDEX" -r requirements.txt 2>/dev/null && cd -
+    git clone https://github.com/microsoft/OmniParser.git "$CACHE_DIR/OmniParser" 2>/dev/null || true
+    cd "$CACHE_DIR/OmniParser"
+    pip install -r requirements.txt
     python -c "from util.utils import download_weights; download_weights()" 2>/dev/null || \
-    echo "  Please download OmniParser weights from: https://huggingface.co/microsoft/OmniParser-v2.0"
+    echo "Please download OmniParser weights from: https://huggingface.co/microsoft/OmniParser-v2.0"
+    cd -
 }
 
 install_dino_x() {
     echo ""
     echo ">>> Installing DINO-X..."
-    pip_install_git "IDEA-Research/dino-x-api" "  DINO-X failed, trying Grounding DINO fallback..."
-    if [ $? -ne 0 ]; then
-        echo "  Installing Grounding DINO fallback..."
-        clone_with_mirrors "IDEA-Research/GroundingDINO" "$CACHE_DIR/GroundingDINO" 2>/dev/null || true
-        cd "$CACHE_DIR/GroundingDINO" && pip install --index-url "$PIP_INDEX" -e . 2>/dev/null && cd -
-    fi
+    pip install git+https://github.com/IDEA-Research/dino-x-api.git 2>/dev/null || \
+    echo "DINO-X API install failed, installing Grounding DINO fallback..."
+    git clone https://github.com/IDEA-Research/GroundingDINO.git "$CACHE_DIR/GroundingDINO" 2>/dev/null || true
+    cd "$CACHE_DIR/GroundingDINO"
+    pip install -e .
+    cd -
 }
 
 install_botsort() {
     echo ""
     echo ">>> Installing BoT-SORT..."
-    pip install --index-url "$PIP_INDEX" ultralytics 2>/dev/null || \
-    pip install --index-url "$PIP_INDEX" botsort 2>/dev/null || \
-    echo "  Please install ultralytics: pip install ultralytics"
+    pip install ultralytics 2>/dev/null || \
+    pip install botsort 2>/dev/null || \
+    echo "Please install ultralytics: pip install ultralytics"
     echo "BoT-SORT installed (via ultralytics trackers)"
 }
 
 install_depth_pro() {
     echo ""
     echo ">>> Installing Depth Pro..."
-    clone_with_mirrors "apple/ml-depth-pro" "$CACHE_DIR/ml-depth-pro" 2>/dev/null || \
-    echo "  Depth Pro clone failed. Weights auto-download from HuggingFace on first use."
-    cd "$CACHE_DIR/ml-depth-pro" && pip install --index-url "$PIP_INDEX" -e . 2>/dev/null && cd -
+    git clone https://github.com/apple/ml-depth-pro.git "$CACHE_DIR/ml-depth-pro" 2>/dev/null || true
+    cd "$CACHE_DIR/ml-depth-pro"
+    pip install -e .
+    cd -
     echo "Depth Pro installed. Weights will be downloaded on first use from HuggingFace."
 }
 
 install_vggt() {
     echo ""
     echo ">>> Installing VGGT..."
-    pip_install_git "facebookresearch/vggt" "  VGGT repo install failed."
-    if [ $? -ne 0 ]; then
-        echo "  Using HuggingFace transformers (auto-downloads meta/VGGT on first run)..."
-    fi
-    pip install --index-url "$PIP_INDEX" "transformers>=4.47.0"
+    pip install git+https://github.com/facebookresearch/vggt.git 2>/dev/null || \
+    echo "VGGT official repo install failed, using HuggingFace transformers (auto-downloads on first run)..."
+    pip install transformers>=4.47.0
+    echo "VGGT will auto-download weights from HuggingFace (meta/VGGT) on first use."
 }
 
 install_3dgs() {
     echo ""
     echo ">>> Installing 3D Gaussian Splatting..."
-    pip install --index-url "$PIP_INDEX" gsplat nerfstudio plyfile
+    pip install gsplat
+    pip install nerfstudio
+    pip install plyfile
     echo "3DGS installed."
 }
 
