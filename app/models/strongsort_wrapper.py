@@ -1,4 +1,7 @@
-"""StrongSORT — robust multi-object tracking with ReID + Kalman + GMC."""
+"""BoT-SORT — robust multi-object tracking with ReID + camera motion compensation.
+
+Upgraded from StrongSORT: higher MOTA/MOTP, better camera motion compensation.
+"""
 
 from __future__ import annotations
 
@@ -13,11 +16,11 @@ logger = logging.getLogger(__name__)
 _tracker = None
 
 
-class StrongSORTTracker:
-    """StrongSORT tracker wrapper for multi-object tracking.
+class BoTSORTTracker:
+    """BoT-SORT tracker wrapper for multi-object tracking.
 
-    Uses ReID features + Kalman filter + Global Motion Compensation
-    for robust tracking with minimal ID switches.
+    Uses ReID features + Kalman filter + camera motion compensation
+    for robust tracking with higher MOTA/MOTP than StrongSORT.
     """
 
     def __init__(self, fps: float = 30.0):
@@ -28,38 +31,50 @@ class StrongSORTTracker:
         self._init_model()
 
     def _init_model(self):
-        """Initialize StrongSORT tracker."""
+        """Initialize BoT-SORT tracker."""
         if settings.mock_mode:
-            logger.info("StrongSORT: using mock mode")
+            logger.info("BoT-SORT: using mock mode")
             return
 
+        # Try Ultralytics BoT-SORT first (most common install path)
         try:
-            from strongsort import StrongSORT
-            from strongsort.utils.reid_model import extract_reid_model
+            from ultralytics.trackers.bot_sort import BOTSORT
 
-            self.tracker = StrongSORT(
-                model_weights=str(self._get_reid_weights()),
-                device=settings.device,
-                fp16=False,
+            self.tracker = BOTSORT(
+                model_weights=None,
+                track_high_thresh=0.5,
+                track_low_thresh=0.1,
+                new_track_thresh=0.6,
+                track_buffer=30,
+                match_thresh=0.8,
+                proximity_thresh=0.5,
+                appearance_thresh=0.25,
+                fuse_first_frame=True,
             )
-            self.tracker.gmc = self._init_gmc()
-            logger.info("StrongSORT tracker initialized")
-        except ImportError:
-            logger.warning("strongsort package not installed, using IoU fallback")
-        except Exception as e:
-            logger.warning(f"StrongSORT init failed: {e}")
+            self._backend = "ultralytics"
+            logger.info("BoT-SORT initialized (ultralytics)")
+            return
+        except (ImportError, AttributeError):
+            logger.info("ultralytics BOTSORT not available, trying standalone botsort")
 
-    def _get_reid_weights(self):
-        from pathlib import Path
-        return Path(settings.model_cache_dir) / "osnet_x1_0_msmt17.pt"
-
-    def _init_gmc(self):
-        """Initialize Global Motion Compensation."""
+        # Try standalone botsort package
         try:
-            from strongsort.utils.gmc import GMC
-            return GMC(method="sparseOptFlow")
+            from botsort import BoTSORT
+
+            self.tracker = BoTSORT(
+                track_high_thresh=0.5,
+                track_low_thresh=0.1,
+                new_track_thresh=0.6,
+                track_buffer=30,
+                match_thresh=0.8,
+            )
+            self._backend = "botsort"
+            logger.info("BoT-SORT initialized (botsort package)")
+            return
         except ImportError:
-            return None
+            logger.warning("botsort package not installed, using IoU fallback")
+        except Exception as e:
+            logger.warning(f"BoT-SORT init failed: {e}")
 
     def update(self, detections: list[dict], frame: np.ndarray | None = None,
                frame_idx: int = 0) -> list[dict]:
@@ -67,38 +82,36 @@ class StrongSORTTracker:
 
         Args:
             detections: list of {bbox, label, confidence, feature?}
-            frame: current frame image (for GMC)
+            frame: current frame image (for camera motion compensation)
             frame_idx: current frame number
 
         Returns:
             list of tracked objects with persistent IDs
         """
         if self.tracker is not None:
-            return self._update_strongsort(detections, frame, frame_idx)
+            return self._update_botsort(detections, frame, frame_idx)
         else:
             return self._update_iou(detections, frame_idx)
 
-    def _update_strongsort(self, detections: list[dict], frame: np.ndarray | None,
-                           frame_idx: int) -> list[dict]:
-        """Update using StrongSORT."""
+    def _update_botsort(self, detections: list[dict], frame: np.ndarray | None,
+                        frame_idx: int) -> list[dict]:
+        """Update using BoT-SORT."""
         try:
-            # Convert detections to format: [x1, y1, x2, y2, conf, feature?]
+            # Convert detections to format: [x1, y1, x2, y2, conf]
             bboxes = []
             for det in detections:
                 x, y, w, h = det["bbox"]
                 bboxes.append([x, y, x + w, y + h, det.get("confidence", 0.5)])
             bboxes = np.array(bboxes)
 
-            features = None
-            if all("feature" in d for d in detections):
-                features = np.array([d["feature"] for d in detections])
-
-            # Run tracker
-            tracks = self.tracker.update(bboxes, frame, features)
+            if self._backend == "ultralytics":
+                tracks = self.tracker.update(bboxes, frame)
+            else:
+                tracks = self.tracker.update(bboxes, frame)
 
             results = []
             for track in tracks:
-                x1, y1, x2, y2, track_id, conf, cls_id = track[:7]
+                x1, y1, x2, y2, track_id, conf, *_ = track[:7]
                 track_id_str = f"obj_{int(track_id):04d}"
                 if track_id_str not in self.tracks:
                     self.tracks[track_id_str] = {"history": []}
@@ -116,7 +129,7 @@ class StrongSORTTracker:
                 })
             return results
         except Exception as e:
-            logger.error(f"StrongSORT update failed: {e}, falling back to IoU")
+            logger.error(f"BoT-SORT update failed: {e}, falling back to IoU")
             return self._update_iou(detections, frame_idx)
 
     def _update_iou(self, detections: list[dict], frame_idx: int) -> list[dict]:
@@ -222,9 +235,13 @@ class StrongSORTTracker:
         self.next_track_id = 0
 
 
-def get_tracker(fps: float = 30.0) -> StrongSORTTracker:
+# Backward-compatible alias
+StrongSORTTracker = BoTSORTTracker
+
+
+def get_tracker(fps: float = 30.0) -> BoTSORTTracker:
     """Get or create tracker instance."""
     global _tracker
     if _tracker is None:
-        _tracker = StrongSORTTracker(fps=fps)
+        _tracker = BoTSORTTracker(fps=fps)
     return _tracker

@@ -33,9 +33,9 @@ class Settings(BaseSettings):
     # Model selection (all enabled by default, mock fallback if weights missing)
     segmentation_model: str = "sam3"
     detection_model: str = "auto"  # omniparser for ui mode, grounding_dino for others
-    tracking_model: str = "strongsort"
+    tracking_model: str = "botsort"
     depth_model: str = "depth_pro"
-    reconstruction_model: str = "mast3r"
+    reconstruction_model: str = "vggt"
     gaussian_splatting: bool = os.environ.get("TTV_ENABLE_3DGS", "false").lower() == "true"
 
     # Thresholds

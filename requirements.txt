@@ -1,3 +1,6 @@
+# Python 3.10+ required (tested with 3.10, 3.11, 3.12)
+# conda create -n ttv python=3.10
+
 # Core
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
@@ -10,9 +13,9 @@ pydantic-settings>=2.7.0
 # pip install git+https://github.com/facebookresearch/sam2.git
 # pip install git+https://github.com/facebookresearch/sam3.git
 
-# Detection — Grounding DINO
-# Install from source:
-# pip install git+https://github.com/IDEA-Research/GroundingDINO.git
+# Detection — DINO-X (SOTA) / Grounding DINO (fallback)
+# pip install git+https://github.com/IDEA-Research/dino-x-api.git
+# Or use HuggingFace (auto-downloads): transformers>=4.47.0
 
 # UI Detection — OmniParser v2
 # Clone from: https://github.com/microsoft/OmniParser
@@ -26,9 +29,9 @@ paddleocr>=2.9.0
 # Or use HuggingFace transformers:
 transformers>=4.47.0
 
-# 3D Reconstruction — MASt3R / DUSt3R
-# Clone from: https://github.com/naver/mast3r
-# Dependencies:
+# 3D Reconstruction — VGGT (Meta, CVPR 2025) / MASt3R (fallback)
+# VGGT via HuggingFace: transformers>=4.47.0 (auto-downloads meta/VGGT)
+# MASt3R fallback: clone from https://github.com/naver/mast3r
 einops>=0.8.0
 timm>=1.0.0
 
@@ -37,10 +40,9 @@ timm>=1.0.0
 # pip install nerfstudio
 plyfile>=1.0
 
-# Tracking — StrongSORT
-# pip install strongsort
-# Or use ByteTrack as fallback:
-# pip install bytetracker
+# Tracking — BoT-SORT (upgraded from StrongSORT)
+# pip install ultralytics  (includes BoT-SORT tracker)
+# Or standalone: pip install botsort
 
 # Video processing
 opencv-python>=4.10.0

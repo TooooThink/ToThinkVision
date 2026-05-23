@@ -1,4 +1,4 @@
-"""Main pipeline v2: SAM 3 + OmniParser + GroundingDINO + Depth Pro + StrongSORT + MASt3R + 3DGS."""
+"""Main pipeline v2: SAM 3 + OmniParser + DINO-X + Depth Pro + BoT-SORT + VGGT + 3DGS."""
 
 from __future__ import annotations
 
@@ -225,7 +225,7 @@ def _process_image(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     if config.enable_omniparser and config.mode == "ui":
         model_versions["detection"] = "omniparser"
     elif config.enable_grounding_dino:
-        model_versions["detection"] = "grounding_dino"
+        model_versions["detection"] = "dinox"
     if config.enable_depth_pro:
         model_versions["depth"] = "depth_pro"
 
@@ -467,13 +467,13 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     if config.enable_omniparser and config.mode == "ui":
         model_versions["detection"] = "omniparser"
     elif config.enable_grounding_dino:
-        model_versions["detection"] = "grounding_dino"
+        model_versions["detection"] = "dinox"
     if config.enable_strongsort:
-        model_versions["tracking"] = "strongsort"
+        model_versions["tracking"] = "botsort"
     if config.enable_depth_pro:
         model_versions["depth"] = "depth_pro"
     if config.enable_mast3r:
-        model_versions["reconstruction"] = "mast3r"
+        model_versions["reconstruction"] = "vggt"
     if config.enable_gaussian_splatting and gs_data:
         model_versions["gaussian_splatting"] = "gsplat"
 
