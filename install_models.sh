@@ -5,6 +5,21 @@ set -e
 CACHE_DIR="${MODEL_CACHE_DIR:-$HOME/.cache/tothinkvision}"
 mkdir -p "$CACHE_DIR"
 
+# Mirror configuration (set to "true" to use mirrors)
+USE_MIRROR="${USE_MIRROR:-true}"
+
+if [ "$USE_MIRROR" = "true" ]; then
+    PIP_INDEX="-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
+    GH_PROXY="https://ghproxy.cn/"
+    HF_ENDPOINT="https://hf-mirror.com"
+else
+    PIP_INDEX=""
+    GH_PROXY=""
+    HF_ENDPOINT="https://huggingface.co"
+fi
+
+export HF_ENDPOINT
+
 echo "=========================================="
 echo "  ToThinkVision v2 — Model Installer"
 echo "=========================================="
@@ -25,20 +40,20 @@ read -p "Enter selection (1-8): " choice
 install_sam3() {
     echo ""
     echo ">>> Installing SAM 3..."
-    pip install git+https://github.com/facebookresearch/sam3.git 2>/dev/null || \
-    pip install git+https://github.com/facebookresearch/sam2.git
+    pip install ${PIP_INDEX} git+${GH_PROXY}https://github.com/facebookresearch/sam3.git 2>/dev/null || \
+    pip install ${PIP_INDEX} git+${GH_PROXY}https://github.com/facebookresearch/sam2.git
     echo "SAM 3/2 installed. Downloading checkpoint..."
-    wget -nc -P "$CACHE_DIR" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" 2>/dev/null || \
-    curl -L -o "$CACHE_DIR/sam2.1_hiera_large.pt" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
+    wget -nc -P "$CACHE_DIR" "${GH_PROXY}https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" 2>/dev/null || \
+    curl -L -o "$CACHE_DIR/sam2.1_hiera_large.pt" "${GH_PROXY}https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
     echo "SAM 3 checkpoint saved to $CACHE_DIR"
 }
 
 install_omniparser() {
     echo ""
     echo ">>> Installing OmniParser v2..."
-    git clone https://github.com/microsoft/OmniParser.git "$CACHE_DIR/OmniParser" 2>/dev/null || true
+    git clone ${GH_PROXY}https://github.com/microsoft/OmniParser.git "$CACHE_DIR/OmniParser" 2>/dev/null || true
     cd "$CACHE_DIR/OmniParser"
-    pip install -r requirements.txt
+    pip install ${PIP_INDEX} -r requirements.txt
     python -c "from util.utils import download_weights; download_weights()" 2>/dev/null || \
     echo "Please download OmniParser weights from: https://huggingface.co/microsoft/OmniParser-v2.0"
     cd -
@@ -47,19 +62,19 @@ install_omniparser() {
 install_dino_x() {
     echo ""
     echo ">>> Installing DINO-X..."
-    pip install git+https://github.com/IDEA-Research/dino-x-api.git 2>/dev/null || \
+    pip install ${PIP_INDEX} git+${GH_PROXY}https://github.com/IDEA-Research/dino-x-api.git 2>/dev/null || \
     echo "DINO-X API install failed, installing Grounding DINO fallback..."
-    git clone https://github.com/IDEA-Research/GroundingDINO.git "$CACHE_DIR/GroundingDINO" 2>/dev/null || true
+    git clone ${GH_PROXY}https://github.com/IDEA-Research/GroundingDINO.git "$CACHE_DIR/GroundingDINO" 2>/dev/null || true
     cd "$CACHE_DIR/GroundingDINO"
-    pip install -e .
+    pip install ${PIP_INDEX} -e .
     cd -
 }
 
 install_botsort() {
     echo ""
     echo ">>> Installing BoT-SORT..."
-    pip install ultralytics 2>/dev/null || \
-    pip install botsort 2>/dev/null || \
+    pip install ${PIP_INDEX} ultralytics 2>/dev/null || \
+    pip install ${PIP_INDEX} botsort 2>/dev/null || \
     echo "Please install ultralytics: pip install ultralytics"
     echo "BoT-SORT installed (via ultralytics trackers)"
 }
@@ -67,9 +82,9 @@ install_botsort() {
 install_depth_pro() {
     echo ""
     echo ">>> Installing Depth Pro..."
-    git clone https://github.com/apple/ml-depth-pro.git "$CACHE_DIR/ml-depth-pro" 2>/dev/null || true
+    git clone ${GH_PROXY}https://github.com/apple/ml-depth-pro.git "$CACHE_DIR/ml-depth-pro" 2>/dev/null || true
     cd "$CACHE_DIR/ml-depth-pro"
-    pip install -e .
+    pip install ${PIP_INDEX} -e .
     cd -
     echo "Depth Pro installed. Weights will be downloaded on first use from HuggingFace."
 }
@@ -77,18 +92,18 @@ install_depth_pro() {
 install_vggt() {
     echo ""
     echo ">>> Installing VGGT..."
-    pip install git+https://github.com/facebookresearch/vggt.git 2>/dev/null || \
+    pip install ${PIP_INDEX} git+${GH_PROXY}https://github.com/facebookresearch/vggt.git 2>/dev/null || \
     echo "VGGT official repo install failed, using HuggingFace transformers (auto-downloads on first run)..."
-    pip install transformers>=4.47.0
+    pip install ${PIP_INDEX} "transformers>=4.47.0"
     echo "VGGT will auto-download weights from HuggingFace (meta/VGGT) on first use."
 }
 
 install_3dgs() {
     echo ""
     echo ">>> Installing 3D Gaussian Splatting..."
-    pip install gsplat
-    pip install nerfstudio
-    pip install plyfile
+    pip install ${PIP_INDEX} gsplat
+    pip install ${PIP_INDEX} nerfstudio
+    pip install ${PIP_INDEX} plyfile
     echo "3DGS installed."
 }
 
