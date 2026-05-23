@@ -32,21 +32,14 @@ echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null 
 
 # ── Environment ──
 echo ""
-echo "── Setting up environment ──"
-PYTHON=python3
-if ! command -v $PYTHON &>/dev/null; then
-    PYTHON=python
-fi
+echo "── Activating conda environment ──"
 
-if [ ! -d "venv" ]; then
-    echo "Creating venv..."
-    $PYTHON -m venv venv
-fi
-source venv/bin/activate
+# Init conda for non-interactive shell
+eval "$(conda shell.bash hook 2>/dev/null)" || source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || true
 
-echo "Installing dependencies..."
-pip install -q -r requirements.txt
-echo "Packages OK"
+conda activate ttv 2>/dev/null || conda activate base
+echo "Python: $(which python)"
+echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'N/A')"
 
 # ── Check model weights ──
 echo ""

@@ -44,12 +44,25 @@ uploads/
 # Temp dirs created during processing
 ttv_*/
 
+# Conda
+*.conda
+conda-meta/
+
+# Slurm job logs (generated on cluster)
+*.out
+*.err
+
+# Test input files (user uploads, not part of repo)
+test_input.*
+
 # Model weights (large binary files, download via install_models.sh)
 *.pt
 *.pth
 *.onnx
 *.safetensors
 *.bin
+*.ckpt
+*.model
 
 # Model cache directory
 .cache/tothinkvision/
