@@ -14,40 +14,21 @@ else
     HF_ENDPOINT="https://huggingface.co"
 fi
 
-# Try multiple GitHub proxies in order
-# Proxies: git clone + curl download zip fallback
+# GitHub mirror: gh-proxy.com
 try_clone() {
     # $1 = repo (org/name), $2 = dest
     local raw="https://github.com/$1.git"
+    local proxy="https://gh-proxy.com/"
 
-    # Method 1: git clone via proxies
-    for proxy in \
-        "https://gh-proxy.com/" \
-        "https://ghproxy.net/" \
-        "https://gh.llkk.cc/" \
-        ""; do
-        if [ -z "$proxy" ]; then
-            git clone "$raw" "$2" 2>/dev/null && return 0
-        else
-            git clone "${proxy}${1}.git" "$2" 2>/dev/null && return 0
-        fi
-    done
+    # Method 1: git clone via proxy
+    git clone "${proxy}${raw}" "$2" 2>/dev/null && return 0
 
     # Method 2: download zip via proxy, then unzip
-    for proxy in \
-        "https://gh-proxy.com/" \
-        "https://ghproxy.net/" \
-        ""; do
-        if [ -z "$proxy" ]; then
-            curl -fSL "https://github.com/$1/archive/refs/heads/main.zip" -o "$2.zip" 2>/dev/null || continue
-        else
-            curl -fSL "${proxy}https://github.com/$1/archive/refs/heads/main.zip" -o "$2.zip" 2>/dev/null || continue
-        fi
-        unzip -q "$2.zip" -d "$(dirname "$2")" 2>/dev/null && \
-        mv "$(dirname "$2")/$1-main" "$2" && \
-        rm -f "$2.zip" && \
-        return 0
-    done
+    curl -fSL "${proxy}${raw%/}/archive/refs/heads/main.zip" -o "$2.zip" && \
+    unzip -q "$2.zip" -d "$(dirname "$2")" 2>/dev/null && \
+    mv "$(dirname "$2")/$1-main" "$2" && \
+    rm -f "$2.zip" && \
+    return 0
 
     return 1
 }
@@ -84,7 +65,7 @@ install_sam3() {
     fi
     echo "SAM 3/2 installed. Downloading checkpoint..."
     # SAM 3 uses SAM 2.1 as its backbone — no separate SAM 3 weights yet
-    wget -nc -P "$CACHE_DIR" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" 2>/dev/null || \
+    wget -P "$CACHE_DIR" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" || \
     curl -L -o "$CACHE_DIR/sam2.1_hiera_large.pt" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
     echo "SAM 3 checkpoint saved to $CACHE_DIR"
 }
