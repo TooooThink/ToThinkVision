@@ -5,18 +5,52 @@ set -e
 CACHE_DIR="${MODEL_CACHE_DIR:-$HOME/.cache/tothinkvision}"
 mkdir -p "$CACHE_DIR"
 
-# Mirror configuration (set to "true" to use mirrors)
-USE_MIRROR="${USE_MIRROR:-true}"
-
+# GitHub mirror helpers: try multiple proxies until one works
 if [ "$USE_MIRROR" = "true" ]; then
     PIP_INDEX="-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
-    GH_MIRROR="https://gitclone.com/github.com/"
     HF_ENDPOINT="https://hf-mirror.com"
 else
     PIP_INDEX=""
-    GH_MIRROR="https://github.com/"
     HF_ENDPOINT="https://huggingface.co"
 fi
+
+# Try multiple GitHub proxies in order
+# Proxies: git clone + curl download zip fallback
+try_clone() {
+    # $1 = repo (org/name), $2 = dest
+    local raw="https://github.com/$1.git"
+
+    # Method 1: git clone via proxies
+    for proxy in \
+        "https://gh-proxy.com/" \
+        "https://ghproxy.net/" \
+        "https://gh.llkk.cc/" \
+        ""; do
+        if [ -z "$proxy" ]; then
+            git clone "$raw" "$2" 2>/dev/null && return 0
+        else
+            git clone "${proxy}${1}.git" "$2" 2>/dev/null && return 0
+        fi
+    done
+
+    # Method 2: download zip via proxy, then unzip
+    for proxy in \
+        "https://gh-proxy.com/" \
+        "https://ghproxy.net/" \
+        ""; do
+        if [ -z "$proxy" ]; then
+            curl -fSL "https://github.com/$1/archive/refs/heads/main.zip" -o "$2.zip" 2>/dev/null || continue
+        else
+            curl -fSL "${proxy}https://github.com/$1/archive/refs/heads/main.zip" -o "$2.zip" 2>/dev/null || continue
+        fi
+        unzip -q "$2.zip" -d "$(dirname "$2")" 2>/dev/null && \
+        mv "$(dirname "$2")/$1-main" "$2" && \
+        rm -f "$2.zip" && \
+        return 0
+    done
+
+    return 1
+}
 
 export HF_ENDPOINT
 
@@ -40,15 +74,16 @@ read -p "Enter selection (1-8): " choice
 install_sam3() {
     echo ""
     echo ">>> Installing SAM 3..."
-    git clone ${GH_MIRROR}facebookresearch/sam3.git "$CACHE_DIR/sam3" 2>/dev/null || \
-    git clone ${GH_MIRROR}facebookresearch/sam2.git "$CACHE_DIR/sam3" 2>/dev/null || \
-    { echo "SAM git clone failed, installing from PyPI fallback"; cd "$CACHE_DIR"; }
+    try_clone "facebookresearch/sam3" "$CACHE_DIR/sam3" || \
+    try_clone "facebookresearch/sam2" "$CACHE_DIR/sam3" || \
+    { echo "SAM git clone failed, skipping pip install"; }
     if [ -f "$CACHE_DIR/sam3/setup.py" ] || [ -f "$CACHE_DIR/sam3/pyproject.toml" ]; then
         cd "$CACHE_DIR/sam3"
         pip install ${PIP_INDEX} -e .
         cd -
     fi
     echo "SAM 3/2 installed. Downloading checkpoint..."
+    # SAM 3 uses SAM 2.1 as its backbone — no separate SAM 3 weights yet
     wget -nc -P "$CACHE_DIR" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" 2>/dev/null || \
     curl -L -o "$CACHE_DIR/sam2.1_hiera_large.pt" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
     echo "SAM 3 checkpoint saved to $CACHE_DIR"
@@ -57,7 +92,7 @@ install_sam3() {
 install_omniparser() {
     echo ""
     echo ">>> Installing OmniParser v2..."
-    git clone ${GH_MIRROR}microsoft/OmniParser.git "$CACHE_DIR/OmniParser" 2>/dev/null || true
+    try_clone "microsoft/OmniParser" "$CACHE_DIR/OmniParser" || true
     cd "$CACHE_DIR/OmniParser"
     pip install ${PIP_INDEX} -r requirements.txt
     python -c "from util.utils import download_weights; download_weights()" 2>/dev/null || \
@@ -68,9 +103,11 @@ install_omniparser() {
 install_dino_x() {
     echo ""
     echo ">>> Installing DINO-X..."
-    pip install ${PIP_INDEX} git+${GH_MIRROR}IDEA-Research/dino-x-api.git 2>/dev/null || \
+    try_clone "IDEA-Research/dino-x-api" "$CACHE_DIR/dino-x-api" 2>/dev/null && \
+    cd "$CACHE_DIR/dino-x-api" && \
+    pip install ${PIP_INDEX} -e . && cd - || \
     echo "DINO-X API install failed, installing Grounding DINO fallback..."
-    git clone ${GH_MIRROR}IDEA-Research/GroundingDINO.git "$CACHE_DIR/GroundingDINO" 2>/dev/null || true
+    try_clone "IDEA-Research/GroundingDINO" "$CACHE_DIR/GroundingDINO" 2>/dev/null || true
     cd "$CACHE_DIR/GroundingDINO"
     pip install ${PIP_INDEX} -e .
     cd -
@@ -88,7 +125,7 @@ install_botsort() {
 install_depth_pro() {
     echo ""
     echo ">>> Installing Depth Pro..."
-    git clone ${GH_MIRROR}apple/ml-depth-pro.git "$CACHE_DIR/ml-depth-pro" 2>/dev/null || true
+    try_clone "apple/ml-depth-pro" "$CACHE_DIR/ml-depth-pro" || true
     cd "$CACHE_DIR/ml-depth-pro"
     pip install ${PIP_INDEX} -e .
     cd -
@@ -98,7 +135,9 @@ install_depth_pro() {
 install_vggt() {
     echo ""
     echo ">>> Installing VGGT..."
-    pip install ${PIP_INDEX} git+${GH_MIRROR}facebookresearch/vggt.git 2>/dev/null || \
+    try_clone "facebookresearch/vggt" "$CACHE_DIR/vggt" 2>/dev/null && \
+    cd "$CACHE_DIR/vggt" && \
+    pip install ${PIP_INDEX} -e . && cd - || \
     echo "VGGT official repo install failed, using HuggingFace transformers (auto-downloads on first run)..."
     pip install ${PIP_INDEX} "transformers>=4.47.0"
     echo "VGGT will auto-download weights from HuggingFace (meta/VGGT) on first use."
