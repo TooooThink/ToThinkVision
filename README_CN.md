@@ -1,6 +1,6 @@
 # ToThinkVision v2.0 — 四合一通用视觉结构化引擎
 
-输入任意图片/视频，自动调用 **7 个顶级 AI 模型** 并行分析，输出 2D + 3D 全结构化数据，支持 **20+ 种导出格式**（含游戏引擎 3D / PSD 分层 / AE 动画 / .splat 高斯场）。
+输入任意图片/视频，自动调用 **7 个顶级 AI 模型** 并行分析，输出 2D + 3D 全结构化数据，支持 **20+ 种导出格式**（含游戏引擎 3D 网格+纹理 / PSD 分层 / AE 动画 / .splat 高斯场）。
 
 开源研究 & 工业项目，默认全部开启最强配置，用户可自由选择关闭某些模型。
 
@@ -37,94 +37,124 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 二、核心模型（v2 全部默认开启）
+## 二、流水线：从视频到可编辑 3D 场景
+
+```
+输入：图片 / 视频 (.mp4 / .png)
+  │
+  ▼
+┌──────────────────────────────────────────────────────────┐
+│ 阶段1：感知（Perception）                                 │
+│   "画面里有什么？在哪里？"                                  │
+│   目标检测 → 实例分割 → 多目标跟踪 → OCR文字识别            │
+│   输出：每帧中每个物体的 2D bbox + mask + 跨帧track_id     │
+├──────────────────────────────────────────────────────────┤
+│ 阶段2：深度（Depth）                                      │
+│   "每个像素离我多远？"                                      │
+│   单目深度估计（每帧独立）                                   │
+│   输出：深度图 (H×W)，单位米                                │
+├──────────────────────────────────────────────────────────┤
+│ 阶段3：3D重建（3D Reconstruction）                        │
+│   "真实世界长什么样？"                                      │
+│   多视角融合 → 场景点云 → 逐对象网格 → UV展开 → 纹理烘焙     │
+│   输出：3D点云 + 相机位姿 + 带贴图的3D网格(.obj/.gltf)      │
+├──────────────────────────────────────────────────────────┤
+│ 阶段4：场景理解（Scene Understanding）                     │
+│   "这是什么场景？地面在哪？重力方向？"                        │
+│   地面平面检测(RANSAC) → 重力对齐 → 物体分类 → 物理属性      │
+│   输出：场景布局分析 {floor, walls, furniture, ...}        │
+├──────────────────────────────────────────────────────────┤
+│ 阶段5：导出（Export）                                     │
+│   "目标引擎能读懂什么？"                                    │
+│   glTF(OV+纹理+PBR) / OBJ+MTL / Unity JSON / AE脚本 / PSD  │
+│   输出：各目标平台可用的文件                                 │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 三、核心模型（v2 全部默认开启）
 
 | 模型 | 来源 | 显存 | 作用 |
 |------|------|------|------|
 | **SAM 3** | Meta AI | 12-24GB | 统一检测 + 分割 + 追踪（promptable concept） |
 | **OmniParser v2** | Microsoft | 8-12GB | UI 元素精准检测 + 交互性预测 |
-| **Grounding DINO 1.6** | IDEA-Research | 4-8GB | 开放词汇通用目标检测 |
+| **Grounding DINO** | IDEA-Research | 4-8GB | 开放词汇通用目标检测 |
 | **StrongSORT** | CVPR 2023 | CPU | ReID + Kalman + GMC 多目标追踪 |
 | **Depth Pro** | Apple (ICLR 2025) | 4-8GB | 真实米级深度估计，<1 秒推理 |
-| **MASt3R** | Meta (2025) | 24-48GB | 视频 → 3D 点云 + 相机位姿 |
+| **MASt3R** | NAVER (2024) | 24-48GB | 视频 → 3D 点云 + 相机位姿 (SfM) |
 | **3D Gaussian Splatting** | Nerfstudio | 24GB | 视频 → 照片级 3D 高斯场景 |
 
 所有模型均可通过环境变量单独关闭，也可全部启用获得最佳效果。
 
 ---
 
-## 三、功能管线
+## 四、你能获得什么
 
-```
-输入层
-  ├── 图片 → 预处理
-  └── 视频 → FFmpeg 拆帧（可配置采样率）
+### 逐对象数据
 
-分析层（全模型并行，默认全部开启）
-  ├── SAM 3 → 检测 + 分割 + 追踪（三合一）
-  ├── OmniParser v2 → UI 模式精准元素检测
-  ├── Grounding DINO 1.6 → 通用模式开放词汇检测
-  ├── Depth Pro → 每帧度量深度（米）
-  └── StrongSORT → 跨帧追踪（兜底）
+- **2D**：bbox、分割 mask、轮廓、裁剪图
+- **3D**：深度值、3D 位置 (bbox_3d)、点云索引
+- **网格**：三角网格（顶点/面/法线）、UV 坐标、烘焙纹理（512×512 PNG）、逐对象 OBJ 文件
+- **时序**：出现/消失帧、运动轨迹 [{x, y, t}]、速度、逐帧深度
+- **外观**：主色、色板
+- **关系**：与其他物体碰撞、相对方位（上/下/左/右）
+- **交互**：可点击、可滚动、开关状态
 
-3D 重建层
-  ├── MASt3R → 采样帧对 → 3D 点云 + 相机位姿
-  └── 3DGS (gsplat) → 训练高斯场 → .splat/.ply
+### 全局场景数据
 
-中间层 JSON（扩展版）
-  ├── StructuredObject: id, bbox, mask, 3d_pose, depth_meters, color, text, trajectory, relations
-  ├── PointCloud: points(N,3), colors(N,3), normals(N,3), confidence(N)
-  ├── CameraPose: frame_idx, intrinsics(3x3), extrinsics(4x4), quaternion
-  └── GaussianSplat: means, quats, scales, opacities, SH_coeffs
-
-导出层（20+ 种格式）
-  ├── UI: Figma JSON, HTML+CSS, UI JSON
-  ├── Game 3D: Unity .splat + 导入脚本, UE5 .splat, glTF/PLY, OBJ, Unity/UE JSON
-  ├── Video: AE 关键帧 JSON, 轨迹 CSV, PR 标记
-  ├── PSD + AEPX: Photoshop PSD (分层) + After Effects 工程 (动画)
-  ├── .splat 二进制: UnityGaussianSplatting / UnrealSplat 插件直接加载
-  └── Embodied: Robot Actions, Pose CSV
-```
+- **点云**：(N, 3) XYZ 点 + (N, 3) RGB 颜色 + (N, 3) 法线
+- **相机位姿**：每帧内参 (3×3 K) + 外参 (4×4 RT) + 位置 + 四元数旋转
+- **高斯参数**：means, quaternions, scales, opacities, 球谐系数
+- **场景网格**：合并 OBJ 文件，含所有对象网格、UV、纹理、MTL 材质
 
 ---
 
-## 四、20+ 种导出格式
+## 五、20+ 种导出格式
 
-### UI 解构
-- `figma_json` — Figma 文档结构
-- `html_css` — 带内联 CSS 的自包含 HTML
-- `ui_json` — 简化 UI 组件 JSON
+### 3D 网格与场景
+| 格式 | 扩展名 | 说明 |
+|------|--------|------|
+| `gltf` | `.gltf` + `.bin` | glTF 2.0，含 UV 坐标、嵌入纹理、PBR 材质、相机位姿节点 |
+| `obj_3d` | `.obj` + `.mtl` | Wavefront OBJ，含 UV、MTL 材质、纹理引用 (map_Kd)、相机位姿注释 |
 
-### 游戏 3D
-- `unity_json` — Unity GameObject + Collider + Rigidbody + 3D 点云摘要
-- `ue_json` — Unreal Engine Actor 结构
-- `collision_json` — 纯碰撞盒数据
-- `unity_splat` — .splat 二进制 + Unity C# 导入脚本
-- `ue_splat` — .splat 二进制 + UE 导入说明
-- `gltf` — .ply 格式（含高斯参数，可转 glTF）
-- `obj_3d` — OBJ 网格文件
+### 游戏引擎
+| 格式 | 扩展名 | 说明 |
+|------|--------|------|
+| `unity_json` | `.json` | Unity 场景，含 3D 网格 (MeshFilter + MeshRenderer + MeshCollider)、纹理、变换 |
+| `ue_json` | `.json` | UE5 Actor，含 StaticMeshComponent、MaterialInterface、变换 |
+| `unity_splat` | `.splat` | 3D 高斯泼溅二进制，用于 UnityGaussianSplatting 插件 |
+| `ue_splat` | `.splat` | 3D 高斯泼溅二进制，用于 UnrealSplat 插件 |
+| `collision_json` | `.json` | 纯碰撞盒数据，用于物理引擎 |
 
-### PSD + AE 动画
-- `psd_static` — Photoshop PSD 分层文件（每物体 = 一层）
-- `psd_animated` — Photoshop PSD 分层文件（每帧 = Group）
-- `ae_project` — After Effects ExtendScript (.jsx) + 数据 JSON
+### 动画与设计
+| 格式 | 扩展名 | 说明 |
+|------|--------|------|
+| `psd_static` | `.psd` | Photoshop PSD — 每个物体一个透明图层 |
+| `psd_animated` | `.psd` | Photoshop PSD — 每帧一个 Group，含对象图层 |
+| `ae_project` | `.jsx` + `.json` | After Effects ExtendScript — 自动创建含跟踪图层+摄像机的合成 |
+| `ae_keyframes` | `.json` | AE 关键帧时间线（位置/缩放/旋转/透明度） |
+| `video_trajectory` | `.csv` | 逐帧物体轨迹 CSV |
+| `pr_markers` | `.json` | Premiere Pro 章节标记，含时间码 |
 
-### 视频动效
-- `ae_keyframes` — After Effects 关键帧时间线 JSON
-- `video_trajectory` — 逐帧物体轨迹 CSV
-- `pr_markers` — Premiere Pro 章节标记
-
-### 具身智能
-- `embodied_json` — 场景 + 交互序列
-- `robot_action` — 机器人接近/抓取动作序列
-- `pose_csv` — 逐帧 3D 位姿 CSV
+### UI 与具身智能
+| 格式 | 扩展名 | 说明 |
+|------|--------|------|
+| `figma_json` | `.json` | Figma 文档结构（RECTANGLE/TEXT/FRAME 节点） |
+| `html_css` | `.html` | 自包含 HTML，绝对定位元素 |
+| `ui_json` | `.json` | 简化 UI 组件列表 |
+| `embodied_json` | `.json` | 场景对象含 3D 位姿 + 物理属性 + 交互序列 |
+| `robot_action` | `.json` | 机器人接近/抓取动作序列 |
+| `pose_csv` | `.csv` | 逐帧 3D 位姿 CSV |
 
 ### 通用
-- `full_json` — 完整中间层结构化 JSON（含 3D 数据）
+| 格式 | 扩展名 | 说明 |
+|------|--------|------|
+| `full_json` | `.json` | 完整结构化输出，含所有 2D + 3D + 网格 + 相机 + 高斯数据 |
 
 ---
 
-## 五、代码结构详解
+## 六、代码结构详解
 
 ```
 ToThinkVision/
@@ -140,8 +170,9 @@ ToThinkVision/
 │   │   └── 全部模型默认开启，可通过 TTV_ENABLE_* 关闭
 │   │
 │   ├── schemas.py                    # 统一中间层 Pydantic 模型
-│   │   ├── StructuredObject         → 物体: bbox/mask/3d/depth/color/text/trajectory
-│   │   ├── StructuredOutput         → 完整输出 + PointCloud + CameraPose + GaussianSplat
+│   │   ├── StructuredObject         → 物体: bbox/mask/3d/depth/color/text/trajectory/mesh_3d
+│   │   ├── StructuredOutput         → 完整输出 + PointCloud + CameraPose + GaussianSplat + Mesh3D
+│   │   ├── Mesh3D                   → 3D 三角网格 (vertices/faces/normals/uv/texture)
 │   │   ├── PointCloud               → 3D 点云 (points/colors/normals/confidence)
 │   │   ├── CameraPose               → 相机位姿 (intrinsics/extrinsics/quaternion)
 │   │   ├── GaussianSplatData        → 高斯参数 (means/quats/scales/opacities/SH)
@@ -150,33 +181,43 @@ ToThinkVision/
 │   │   └── ExportFormat             → 20+ 种导出格式枚举
 │   │
 │   ├── preprocessor.py               # 文件预处理（类型判断/拆帧/清理）
-│   ├── pipeline.py                   # 主流程编排（图片/视频管线）
+│   ├── pipeline.py                   # 主流程编排（图片/视频管线）★
 │   │
 │   ├── models/                       # AI 模型封装（均有 mock 回退）
 │   │   ├── sam3.py                  → SAM 3: 检测+分割+追踪（替换 segmentor.py）
 │   │   ├── omniparser.py            → OmniParser v2: UI 元素检测
-│   │   ├── grounding_dino.py        → Grounding DINO 1.6: 开放词汇检测
+│   │   ├── grounding_dino.py        → Grounding DINO: 开放词汇检测
 │   │   ├── strongsort_wrapper.py    → StrongSORT: 多目标追踪
 │   │   ├── depth_pro.py             → Depth Pro: 度量深度估计
-│   │   ├── mast3r.py                → MASt3R: 3D 点云重建 + 相机位姿
-│   │   └── gaussian_splatting.py    → 3DGS: 训练 + .splat/.ply 导出
+│   │   ├── mast3r.py                → MASt3R: 3D 点云重建 + 相机位姿 (SfM)
+│   │   ├── gaussian_splatting.py    → 3DGS: 训练 + .splat/.ply 导出
+│   │   └── mesh_reconstruction.py   → ★ 逐对象3D网格: 深度反投影→Poisson→UV→纹理
 │   │
 │   ├── exporters/                    # 导出层
 │   │   ├── base.py                  → Exporter 基类
-│   │   ├── ui_exporter.py           → UI: Figma/HTML/UI JSON
-│   │   ├── game_exporter.py         → Game 3D: Unity/UE/Collision + 3D 点云
+│   │   ├── gltf_exporter.py         → glTF 2.0: UV + 纹理 + PBR 材质
+│   │   ├── obj_exporter.py          → Wavefront OBJ + MTL + UV + 纹理
+│   │   ├── game_exporter.py         → Game 3D: Unity/UE/Collision (3D网格感知)
 │   │   ├── video_exporter.py        → Video: AE/Trajectory/PR
 │   │   ├── embodied_exporter.py     → Embodied: Robot/Pose/Action
 │   │   ├── psd_exporter.py          → PSD: 静态分层 + 视频动画分层
 │   │   ├── ae_project_exporter.py   → AE: ExtendScript .jsx + 关键帧动画
-│   │   └── splat_exporter.py        → Splat: .splat 二进制 + .ply 高斯参数
+│   │   ├── splat_exporter.py        → Splat: .splat 二进制 + .ply 高斯参数
+│   │   ├── ui_exporter.py           → UI: Figma/HTML/UI JSON
+│   │   ├── image_exporter.py        → 裁剪图 / mask / 深度可视化
+│   │   └── manifest.py              → 导出清单（README.txt）
 │   │
 │   └── utils/
-│       ├── pointcloud.py            → 点云处理: back-projection/normals/filtering/PLY
-│       ├── camera.py                → 相机工具: intrinsics/extrinsics/quaternion
+│       ├── camera.py                → 相机工具: 内参/外参/坐标系变换/四元数
+│       ├── pointcloud.py            → 点云处理: 反投影/法线/体素滤波/PLY
 │       ├── color.py                 → 主色提取
 │       ├── geometry.py              → 碰撞检测/相对方位/z-index
+│       ├── texture_bake.py          → UV展开 + 多视角纹理烘焙 ★
+│       ├── scene_understanding.py   → 地面检测(RANSAC)/重力对齐/场景分类 ★
 │       └── io.py                    → JSON 读写
+│
+├── docs/
+│   └── GETTING_STARTED.md           # ★ 新手入门：知识图谱 + 学习路径
 │
 ├── static/
 │   ├── index.html                   → 单页 Web UI
@@ -197,13 +238,13 @@ ToThinkVision/
 
 ---
 
-## 六、如何使用
+## 七、如何使用
 
 ### Web 界面
 
 1. 启动服务后打开 `http://localhost:8000`
 2. 拖拽上传图片/视频
-3. 选择导出格式
+3. 选择导出格式（可多选）
 4. 点击「Process & Export」
 5. 下载结果
 
@@ -219,61 +260,73 @@ curl -X POST http://localhost:8000/api/process \
   -F "export_format=psd_static" \
   -F "mode=ui"
 
-# 上传视频 + 导出 .splat 3D 高斯场景
+# 上传视频 + 导出 glTF 3D 场景（含UV+纹理）
 curl -X POST http://localhost:8000/api/process \
   -F "file=@demo.mp4" \
-  -F "export_format=unity_splat" \
-  -F "mode=video"
+  -F 'export_formats=["gltf", "unity_json"]' \
+  -F "mode=general"
 
 # 下载结果
-curl -O http://localhost:8000/api/download/demo_unity.splat
+curl -O http://localhost:8000/api/download/demo.gltf
 ```
 
 ### Python 直接调用
 
 ```python
 from app.pipeline import process_file
-from app.exporters.splat_exporter import SplatExporter
+from app.exporters.gltf_exporter import GltfExporter
 from app.schemas import ExportFormat
 
-# 处理视频（自动调用 SAM 3 + MASt3R + 3DGS）
+# 处理视频（自动调用 SAM 3 + MASt3R + 网格重建）
 result = process_file("demo.mp4", mode="video")
-
-# 导出 .splat 高斯场景
-exporter = SplatExporter(ExportFormat.UNITY_SPLAT)
-output_path = exporter.export(result)
 
 # 查看 3D 数据
 print(f"点云: {len(result.point_cloud.points)} 点")
 print(f"相机位姿: {len(result.camera_poses)} 帧")
-print(f"高斯数量: {len(result.gaussian_splats.means)}")
+print(f"有3D网格的对象: {sum(1 for o in result.objects if o.mesh_3d)}")
+print(f"场景网格文件: {result.scene_mesh_path}")
+
+# 导出 glTF（含UV+纹理+PBR材质）
+exporter = GltfExporter()
+output_path = exporter.export(result)
 ```
 
 ---
 
-## 七、中间层 JSON 数据结构（v2 扩展）
+## 八、中间层 JSON 数据结构（v2 扩展）
 
-### 物体级别（新增 3D + 蒙版）
+### 物体级别（新增 3D 网格 + 纹理）
 
 ```json
 {
   "id": "obj_0001",
-  "label": "ui_button",
-  "label_custom": "提交按钮",
+  "label": "game_item",
+  "label_custom": "桌子",
   "confidence": 0.92,
 
   "bbox": { "x": 100, "y": 200, "w": 120, "h": 40 },
   "mask_base64": "iVBORw0KGgo...",
   "crop_image_base64": "iVBORw0KGgo...",
-  "contour": [{ "x": 100, "y": 200 }, ...],
+  "crop_png_path": "outputs/demo/obj_0001_crop.png",
 
   "bbox_3d": { "x": 160, "y": 220, "z": 2.5 },
   "depth_value": 2.5,
 
-  "dominant_color": "#3b82f6",
-  "z_index": 5,
+  "mesh_3d": {
+    "vertices": [[x, y, z], ...],
+    "faces": [[0, 1, 2], ...],
+    "normals": [[nx, ny, nz], ...],
+    "uv_coords": [[u, v], ...],
+    "uv_face_map": [[0, 1, 2], ...],
+    "texture_path": "outputs/demo/meshes/obj_0001_texture.png",
+    "texture_base64": "iVBORw0KGgo...",
+    "bounds": {"min": [x, y, z], "max": [x, y, z]},
+    "point_count": 5230
+  },
+  "mesh_obj_file": "outputs/demo/meshes/obj_0001.obj",
 
-  "text_content": "Submit",
+  "dominant_color": "#8b6914",
+  "z_index": 3,
 
   "temporal": {
     "frame_index": 10,
@@ -322,13 +375,14 @@ print(f"高斯数量: {len(result.gaussian_splats.means)}")
     "scales": [[sx, sy, sz], ...],
     "opacities": [0.8, ...],
     "sh_coeffs": [[c0, c1, c2], ...]
-  }
+  },
+  "scene_mesh_path": "outputs/demo/meshes/scene_mesh.obj"
 }
 ```
 
 ---
 
-## 八、环境变量
+## 九、环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -343,12 +397,12 @@ print(f"高斯数量: {len(result.gaussian_splats.means)}")
 | `TTV_ENABLE_STRONGSORT` | `true` | 是否启用 StrongSORT |
 | `TTV_ENABLE_DEPTH_PRO` | `true` | 是否启用 Depth Pro |
 | `TTV_ENABLE_MAST3R` | `true` | 是否启用 MASt3R |
-| `TTV_ENABLE_GAUSSIAN_SPLATTING` | `true` | 是否启用 3DGS 训练 |
+| `TTV_ENABLE_GAUSSIAN_SPLATTING` | `false` | 是否启用 3DGS 训练 |
 | `TTV_OUTPUT_DIR` | `./outputs` | 导出文件输出目录 |
 
 ---
 
-## 九、运行测试
+## 十、运行测试
 
 ```bash
 # 运行全部测试（51 个用例）
@@ -362,9 +416,21 @@ MOCK_MODE=true pytest tests/test_pipeline.py -v     # Tracker + Geometry + Color
 
 ---
 
-## 十、如何进一步开发
+## 十一、新手入门
 
-### 10.1 添加新模型
+刚接触计算机视觉 / 3D 重建？阅读 **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — 完整的新手指南，涵盖：
+
+- 20 个核心知识点，分 6 层递进
+- 每个知识点在项目代码中的对应位置
+- 推荐学习路径（8 个阶段 + 实践任务）
+- 5 个最容易出研究突破的方向
+- 课程、论文、工具资源链接
+
+---
+
+## 十二、如何进一步开发
+
+### 12.1 添加新模型
 
 在 `app/models/` 下新建文件实现相同接口，在 `pipeline.py` 中调用即可。所有模型封装都自带 mock 回退。
 
@@ -375,26 +441,27 @@ def detect_objects(img, mode="general"):
     return [{"bbox": [...], "label": "xxx", "confidence": 0.9}]
 ```
 
-### 10.2 添加新导出格式
+### 12.2 添加新导出格式
 
 1. 在 `app/schemas.py` 的 `ExportFormat` 枚举中添加
 2. 在 `app/exporters/` 下新建导出器，继承 `BaseExporter`
 3. 在 `app/main.py` 的 `EXPORT_FORMAT_MAP` 中注册
 4. 在 `static/index.html` 的 `FORMAT_MAP` 中添加前端选项
 
-### 10.3 优化 3D 重建
+### 12.3 优化 3D 重建
 
-- 替换 MASt3R 为其他 SfM 方案（COLMAP + NeRF）
-- 调整 3DGS 训练参数（迭代次数、SH 阶数）
-- 添加网格重建（Poisson / Marching Cubes）
+- 集成 COLMAP 做更精确的相机位姿估计
+- 用 nerfstudio 替代手写 3DGS 训练循环
+- 从 NeRF/3DGS 密度场提取高质量网格（替代深度反投影）
+- 用 VLM（如 Qwen-VL）辅助语义分割和场景理解
 
-### 10.4 增强 PSD/AE 导出
+### 12.4 增强 PSD/AE 导出
 
 - 使用 PhotoshopAPI 写入真实 PSD 文件
 - 在 AE 脚本中添加遮罩/形状图层
 - 导出 AEPX 工程文件（需要 AE 脚本解析器）
 
-### 10.5 批量处理 & 异步任务
+### 12.5 批量处理 & 异步任务
 
 ```python
 # 使用 Celery 或 FastAPI BackgroundTasks
@@ -407,7 +474,7 @@ async def batch_process(files: list[UploadFile] = File(...)):
     return results
 ```
 
-### 10.6 部署
+### 12.6 部署
 
 ```bash
 # Docker
@@ -420,7 +487,7 @@ docker run -p 8000:8000 --gpus all tothinkvision
 
 ---
 
-## 十一、常见问题
+## 十三、常见问题
 
 **Q: 没有 GPU 能跑吗？**
 A: 可以。设置 `MOCK_MODE=true` 用模拟数据跑通全流程。导出格式验证不需要 GPU。
@@ -436,3 +503,6 @@ A: 自动降级到 mock 模式，不影响服务运行。手动下载权重到 `
 
 **Q: .splat 文件怎么用？**
 A: Unity: 导入 [UnityGaussianSplatting](https://github.com/aras-p/UnityGaussianSplatting) 插件，将 `.splat` 拖入场景即可实时渲染。UE: 使用 [UnrealSplat](https://github.com/mrquicksilver/UnrealSplat) 插件。
+
+**Q: 3D 网格怎么导入 Unity/Blender？**
+A: glTF: 直接拖入 Blender，或用 [gltf-viewer](https://gltf-viewer.donmccurdy.com) 在浏览器中预览。OBJ: 通用格式，所有 3D 软件都能导入。Unity JSON: 需要配套 C# 导入脚本（详见 manifest 说明）。
