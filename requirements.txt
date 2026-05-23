@@ -1,6 +1,10 @@
 # Python 3.10+ required (tested with 3.10, 3.11, 3.12)
 # conda create -n ttv python=3.10
 
+# Build dependencies (fixes pkg_resources error on new pip)
+setuptools>=69.0.0
+wheel>=0.42.0
+
 # Core
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
