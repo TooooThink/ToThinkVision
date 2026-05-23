@@ -25,6 +25,8 @@ pydantic-settings>=2.7.0
 # Clone from: https://github.com/microsoft/OmniParser
 
 # OCR
+# pandas pinned to avoid source build with old gcc — install before paddleocr
+pandas>=2.0.0,<2.3
 paddlepaddle>=2.6.0
 paddleocr>=2.9.0
 
