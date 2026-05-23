@@ -60,3 +60,9 @@ scikit-learn>=1.6.0
 # Testing
 pytest>=8.3.0
 httpx>=0.28.0
+
+# Optional — 3D mesh reconstruction (Poisson surface reconstruction)
+# open3d>=0.18.0
+
+# Optional — UV unwrapping (higher quality than built-in sphere/box projection)
+# pip install xatlas

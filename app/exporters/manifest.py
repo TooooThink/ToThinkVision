@@ -133,15 +133,15 @@ def build_manifest_for_export(
     format_descriptions = {
         "unity_splat": "Unity 3D Gaussian Splatting file — drag into scene with plugin",
         "ue_splat": "UE5 3D Gaussian Splatting file — import with UnrealSplat plugin",
-        "unity_json": "Unity scene description — import via GameObject → ToThinkVision menu",
-        "ue_json": "UE5 scene description — import via Blueprint script",
+        "unity_json": "Unity scene description with 3D meshes — import via GameObject → ToThinkVision menu",
+        "ue_json": "UE5 scene description with 3D meshes — import via Blueprint script",
         "collision_json": "Pure collision box data for game physics",
         "psd_static": "Photoshop PSD — each object is a transparent layer",
         "psd_animated": "Photoshop PSD — each frame is a Group with object layers",
         "ae_project": "After Effects ExtendScript — run in AE to create animated composition",
-        "full_json": "Complete structured data with 2D + 3D + camera + Gaussian info",
-        "gltf": "glTF 2.0 3D scene — universal format for web viewers, Blender, Unity",
-        "obj": "Wavefront OBJ 3D model — compatible with all 3D software",
+        "full_json": "Complete structured data with 2D + 3D + camera + mesh + Gaussian info",
+        "gltf": "glTF 2.0 3D scene with UV + textures — universal format for web viewers, Blender, Unity",
+        "obj_3d": "Wavefront OBJ 3D model with UV + MTL + textures — compatible with all 3D software",
     }
 
     target_map = {

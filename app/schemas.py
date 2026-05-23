@@ -94,6 +94,23 @@ class GaussianSplatData(BaseModel):
     sh_coeffs: list[list[float]] = Field(default_factory=list, description="Spherical harmonic coeffs (N, C)")
 
 
+class Mesh3D(BaseModel):
+    """Triangle mesh with optional UV and texture for a single object."""
+    vertices: list[tuple[float, float, float]] = Field(default_factory=list, description="(V,3) vertex positions in meters")
+    faces: list[tuple[int, int, int]] = Field(default_factory=list, description="(F,3) triangle face indices")
+    normals: list[tuple[float, float, float]] | None = Field(None, description="(V,3) per-vertex normals")
+    # UV coordinates
+    uv_coords: list[tuple[float, float]] | None = Field(None, description="(UV,2) UV coordinates [0,1]")
+    uv_face_map: list[tuple[int, int, int]] | None = Field(None, description="(F,3) mapping from faces to UV coords")
+    # Texture
+    texture_path: str | None = Field(None, description="Path to texture PNG file")
+    texture_base64: str | None = Field(None, description="Texture as base64 PNG")
+    # Bounding box
+    bounds: dict[str, list[float]] | None = Field(None, description="min/max xyz of the mesh")
+    # Point cloud this mesh was generated from
+    point_count: int = 0
+
+
 class PSDLayer(BaseModel):
     """PSD layer specification."""
     name: str = ""
@@ -147,6 +164,8 @@ class StructuredObject(BaseModel):
     bbox_3d: BBox3D | None = None
     depth_value: float | None = Field(None, description="Depth in meters")
     point_cloud_indices: list[int] = Field(default_factory=list, description="Indices into StructuredOutput.point_cloud")
+    mesh_3d: Mesh3D | None = Field(None, description="3D triangle mesh reconstructed from depth maps")
+    mesh_obj_file: str | None = Field(None, description="Path to exported mesh file (OBJ/glTF) for this object")
 
     # Appearance
     dominant_color: str | None = None
@@ -198,6 +217,7 @@ class StructuredOutput(BaseModel):
     gaussian_splats: GaussianSplatData | None = None
     ply_file_path: str | None = None
     splat_file_path: str | None = None
+    scene_mesh_path: str | None = Field(None, description="Path to combined scene mesh (OBJ/glTF)")
 
     # Exported image files (for PS/AE/Unity consumption)
     depth_map_png_path: str | None = Field(None, description="Path to depth map colored visualization PNG")
@@ -250,6 +270,7 @@ class PipelineConfig(BaseModel):
     enable_depth_pro: bool = True
     enable_mast3r: bool = True
     enable_gaussian_splatting: bool = False
+    enable_3d_reconstruction: bool = True  # Per-object 3D mesh from depth back-projection
 
     # Detection mode
     mode: str = "general"  # general, ui, game, video, embodied

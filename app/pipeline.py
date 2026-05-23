@@ -24,6 +24,7 @@ from app.models.depth_pro import DepthPro, get_depth_model
 from app.models.gaussian_splatting import GaussianSplatPipeline, get_splat_pipeline
 from app.models.grounding_dino import GroundingDINO, get_detector
 from app.models.mast3r import MASt3RReconstructor, get_reconstructor
+from app.models.mesh_reconstruction import reconstruct_object_meshes
 from app.models.omniparser import OmniParser, get_omniparser
 from app.models.sam3 import SAM3Predictor, get_contour_from_mask, mask_to_base64
 from app.models.strongsort_wrapper import StrongSORTTracker, get_tracker
@@ -36,6 +37,7 @@ from app.schemas import (
     GaussianSplatData,
     Interaction,
     InteractionType,
+    Mesh3D,
     ObjectRelation,
     ObjectType,
     PipelineConfig,
@@ -272,6 +274,10 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     frame_idx = 0
     keyframe_objects: dict[str, dict] = {}  # track_id → segmentation for SAM 3 prompts
 
+    # Data collection for per-object 3D mesh reconstruction
+    per_frame_obj_data = []
+    all_depth_maps = []
+
     for frame_path in frame_paths:
         img, img_info = preprocess_image(frame_path)
 
@@ -354,6 +360,22 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 )
                 all_frame_objects[tid] = obj
 
+        # Collect per-frame object data for 3D mesh reconstruction
+        frame_obj_list = []
+        for track in tracked:
+            bbox = track["bbox"]
+            tid = track["id"]
+            # Try to get mask from seg_results (keyframe) or SAM propagation
+            seg_mask = None
+            for seg in seg_results:
+                seg_bbox = seg.get("bbox", [])
+                if len(seg_bbox) == 4 and _calc_iou(bbox, seg_bbox) > 0.3:
+                    seg_mask = seg.get("mask")
+                    break
+            frame_obj_list.append({"id": tid, "bbox": list(bbox), "mask": seg_mask})
+        per_frame_obj_data.append({"frame_idx": frame_idx, "objects": frame_obj_list})
+        all_depth_maps.append(depth_map)
+
         frame_idx += 1
 
     # ─── Propagate SAM 3 masks through video ────────────────
@@ -368,6 +390,21 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     if config.enable_mast3r:
         reconstructor = get_reconstructor()
         pc_data, camera_poses = reconstructor.reconstruct(frame_dir)
+
+    # ─── Per-Object 3D Mesh Reconstruction ──────────────────
+    mesh_results = {}
+    scene_mesh_path = None
+    if config.enable_3d_reconstruction and all_depth_maps and per_frame_obj_data:
+        mesh_dir = img_dir / "meshes"
+        mesh_results = reconstruct_object_meshes(
+            frame_paths=frame_paths,
+            per_frame_objects=per_frame_obj_data,
+            depth_maps=all_depth_maps,
+            frame_width=video_meta["width"],
+            frame_height=video_meta["height"],
+            output_dir=mesh_dir,
+            camera_poses=camera_poses,
+        )
 
     # ─── 3D Gaussian Splatting (optional) ───────────────────
     gs_data = None
@@ -386,6 +423,23 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 obj.temporal.velocity = vel
 
     final_objects = _compute_relations(final_objects)
+
+    # Attach per-object meshes to StructuredObjects
+    for obj in final_objects:
+        if obj.id in mesh_results:
+            mdata = mesh_results[obj.id]
+            obj.mesh_3d = Mesh3D(
+                vertices=[tuple(v) for v in mdata.get("vertices", [])],
+                faces=[tuple(f) for f in mdata.get("faces", [])],
+                normals=[tuple(n) for n in mdata["normals"]] if mdata.get("normals") else None,
+                bounds=mdata.get("bounds"),
+                point_count=mdata.get("point_count", 0),
+                texture_path=mdata.get("texture_path"),
+                texture_base64=mdata.get("texture_base64"),
+            )
+            # Save per-object mesh export path
+            if mdata.get("obj_path"):
+                obj.mesh_obj_file = mdata["obj_path"]
 
     # ─── Export visual outputs ──────────────────────────────
     img_dir = _ensure_export_dir(file_path)
@@ -470,6 +524,12 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             opacities=gs_data.get("opacities", []),
             sh_coeffs=gs_data.get("sh_coeffs", []),
         )
+
+    # Set combined scene mesh path
+    if mesh_results:
+        scene_obj = mesh_dir / "scene_mesh.obj"
+        if scene_obj.exists():
+            output.scene_mesh_path = str(scene_obj)
 
     return output
 

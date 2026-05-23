@@ -1,19 +1,21 @@
-"""OBJ 3D exporter — generates Wavefront OBJ from point cloud / 3D data."""
+"""OBJ 3D exporter — generates Wavefront OBJ with mesh + MTL material + UV + texture."""
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import numpy as np
 
+from app.config import settings
 from app.exporters.base import BaseExporter
 from app.schemas import StructuredOutput, ExportFormat
 
 
 class ObjExporter(BaseExporter):
-    """Exports 3D point cloud / Gaussian splat data to Wavefront OBJ format.
+    """Exports 3D mesh data to Wavefront OBJ format with materials, UV coordinates, and textures.
 
-    OBJ is a widely supported 3D format for import into Blender, Maya, Unity,
+    OBJ is a widely-supported 3D format for import into Blender, Maya, Unity,
     and most 3D modeling software.
     """
 
@@ -22,12 +24,154 @@ class ObjExporter(BaseExporter):
     mime_type = "model/obj"
 
     def export(self, data: StructuredOutput) -> Path:
-        if data.gaussian_splats is not None:
+        objects_with_mesh = [obj for obj in data.objects
+                            if obj.mesh_3d is not None and obj.mesh_3d.vertices]
+        if objects_with_mesh:
+            return self._export_meshes(data, objects_with_mesh)
+        elif data.gaussian_splats is not None:
             return self._export_from_splats(data)
         elif data.point_cloud and data.point_cloud.points:
             return self._export_from_pointcloud(data)
         else:
             raise ValueError("No 3D data available for OBJ export.")
+
+    def _export_meshes(self, data: StructuredOutput,
+                       objects_with_mesh: list) -> Path:
+        """Export per-object meshes as OBJ with MTL material file, UV coordinates, and textures."""
+        out_dir = self._output_path(data.source_file).parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        stem = Path(data.source_file).stem
+        obj_path = self._output_path(data.source_file)
+        mtl_path = obj_path.with_suffix(".mtl")
+
+        vertex_offset = 0
+        uv_offset = 0
+        normal_offset = 0
+
+        with open(obj_path, "w", encoding="utf-8") as f:
+            f.write("# ToThinkVision OBJ export\n")
+            f.write(f"# Source: {data.source_file}\n")
+            f.write(f"# Objects: {len(objects_with_mesh)}\n")
+            f.write(f"mtllib {mtl_path.name}\n\n")
+
+        # Write MTL file and collect texture copies
+        with open(mtl_path, "w", encoding="utf-8") as mf:
+            mf.write("# ToThinkVision Materials\n\n")
+
+            for obj in objects_with_mesh:
+                mesh = obj.mesh_3d
+                label = obj.label_custom or obj.id
+                mat_name = f"mat_{label.replace(' ', '_').replace('.', '_')}"
+
+                # MTL material definition
+                mf.write(f"newmtl {mat_name}\n")
+                mf.write("Ka 0.2 0.2 0.2\n")   # Ambient
+                mf.write("Kd 1.0 1.0 1.0\n")   # Diffuse
+                mf.write("Ks 0.5 0.5 0.5\n")   # Specular
+                mf.write("Ns 96.078431\n")     # Shininess
+                mf.write("d 1.0\n")            # Opacity
+                mf.write("illum 2\n")          # Lighting model
+
+                # Add texture if available
+                if mesh.texture_path and Path(mesh.texture_path).exists():
+                    tex_path = Path(mesh.texture_path)
+                    tex_name = tex_path.name
+                    mf.write(f"map_Kd {tex_name}\n")
+
+                    # Copy texture to output dir
+                    dest_tex = out_dir / tex_name
+                    if not dest_tex.exists():
+                        shutil.copy2(tex_path, dest_tex)
+
+                mf.write("\n")
+
+        # Write OBJ geometry
+        with open(obj_path, "a", encoding="utf-8") as f:
+            for obj in objects_with_mesh:
+                mesh = obj.mesh_3d
+                label = obj.label_custom or obj.id
+                mat_name = f"mat_{label.replace(' ', '_').replace('.', '_')}"
+
+                vertices = mesh.vertices
+                faces = mesh.faces
+                normals = mesh.normals
+                uv_coords = mesh.uv_coords
+                uv_face_map = mesh.uv_face_map
+
+                # Use material
+                f.write(f"usemtl {mat_name}\n")
+                f.write(f"o {label}\n\n")
+
+                # Write vertices
+                for v in vertices:
+                    f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
+
+                # Write UV coordinates
+                if uv_coords:
+                    f.write("\n")
+                    for uv in uv_coords:
+                        f.write(f"vt {uv[0]:.6f} {uv[1]:.6f}\n")
+
+                # Write normals
+                if normals:
+                    f.write("\n")
+                    for n in normals:
+                        f.write(f"vn {n[0]:.6f} {n[1]:.6f} {n[2]:.6f}\n")
+
+                # Write faces
+                if faces:
+                    f.write("\n")
+                    has_uv = uv_coords is not None and uv_face_map is not None and len(uv_face_map) == len(faces)
+                    has_normal = normals is not None
+
+                    for fi, face in enumerate(faces):
+                        if has_uv and has_normal:
+                            f.write(f"f {face[0]+vertex_offset+1}/{fi+uv_offset+1}/{face[0]+normal_offset+1} "
+                                    f"{face[1]+vertex_offset+1}/{fi+uv_offset+1}/{face[1]+normal_offset+1} "
+                                    f"{face[2]+vertex_offset+1}/{fi+uv_offset+1}/{face[2]+normal_offset+1}\n")
+                        elif has_uv:
+                            f.write(f"f {face[0]+vertex_offset+1}/{fi+uv_offset+1} "
+                                    f"{face[1]+vertex_offset+1}/{fi+uv_offset+1} "
+                                    f"{face[2]+vertex_offset+1}/{fi+uv_offset+1}\n")
+                        elif has_normal:
+                            f.write(f"f {face[0]+vertex_offset+1}//{face[0]+normal_offset+1} "
+                                    f"{face[1]+vertex_offset+1}//{face[1]+normal_offset+1} "
+                                    f"{face[2]+vertex_offset+1}//{face[2]+normal_offset+1}\n")
+                        else:
+                            f.write(f"f {face[0]+vertex_offset+1} "
+                                    f"{face[1]+vertex_offset+1} "
+                                    f"{face[2]+vertex_offset+1}\n")
+
+                vertex_offset += len(vertices)
+                if uv_coords:
+                    uv_offset += len(uv_coords)
+                if normals:
+                    normal_offset += len(normals)
+
+                f.write("\n")
+
+        # Write camera poses as comments
+        if data.camera_poses:
+            with open(obj_path, "a", encoding="utf-8") as f:
+                f.write(f"\n# Camera poses ({len(data.camera_poses)} frames)\n")
+                for pose in data.camera_poses:
+                    frame_idx = pose.frame_idx if hasattr(pose, "frame_idx") else pose["frame_idx"]
+                    position = pose.position if hasattr(pose, "position") else pose["position"]
+                    f.write(f"# camera_frame_{frame_idx}: {position}\n")
+
+        # Write object bounding boxes
+        with open(obj_path, "a", encoding="utf-8") as f:
+            f.write(f"\n# Object bounding boxes\n")
+            for obj in objects_with_mesh:
+                mesh = obj.mesh_3d
+                label = obj.label_custom or obj.id
+                if mesh.bounds:
+                    f.write(f"# {obj.id} ({label}): "
+                            f"bounds=({mesh.bounds['min'][0]:.2f}, {mesh.bounds['min'][1]:.2f}, {mesh.bounds['min'][2]:.2f}) "
+                            f"to ({mesh.bounds['max'][0]:.2f}, {mesh.bounds['max'][1]:.2f}, {mesh.bounds['max'][2]:.2f})\n")
+
+        return obj_path
 
     def _export_from_splats(self, data: StructuredOutput) -> Path:
         """Export Gaussian splats as OBJ vertices."""
@@ -74,7 +218,6 @@ class ObjExporter(BaseExporter):
             f.write(f"# Points: {n}\n")
             f.write(f"o {object_name}\n\n")
 
-            # Write vertices with optional colors
             for i in range(n):
                 if has_colors:
                     c = colors[i].astype(np.float64) / 255.0
@@ -82,29 +225,10 @@ class ObjExporter(BaseExporter):
                 else:
                     f.write(f"v {points[i,0]:.6f} {points[i,1]:.6f} {points[i,2]:.6f}\n")
 
-            # Write normals if available
             if data.point_cloud and data.point_cloud.normals:
                 normals = np.array(data.point_cloud.normals)
                 for i in range(min(len(normals), n)):
                     f.write(f"vn {normals[i,0]:.6f} {normals[i,1]:.6f} {normals[i,2]:.6f}\n")
-
-            # Write camera poses as reference points
-            if data.camera_poses:
-                f.write(f"\n# Camera poses ({len(data.camera_poses)} frames)\n")
-                for pose in data.camera_poses:
-                    frame_idx = pose.frame_idx if hasattr(pose, "frame_idx") else pose["frame_idx"]
-                    position = pose.position if hasattr(pose, "position") else pose["position"]
-                    f.write(f"# camera_frame_{frame_idx}: {position}\n")
-
-            # Write bounding boxes for detected objects
-            if data.objects:
-                f.write(f"\n# Object bounding boxes ({len(data.objects)} objects)\n")
-                for obj in data.objects:
-                    label = obj.label_custom or obj.label.value
-                    if obj.bbox_3d:
-                        f.write(f"# {obj.id} ({label}): center=({obj.bbox_3d.x:.2f}, {obj.bbox_3d.y:.2f}, {obj.bbox_3d.z:.2f})\n")
-                    else:
-                        f.write(f"# {obj.id} ({label}): 2D box=({obj.bbox.x:.0f}, {obj.bbox.y:.0f}, {obj.bbox.w:.0f}x{obj.bbox.h:.0f})\n")
 
         return out_path
 

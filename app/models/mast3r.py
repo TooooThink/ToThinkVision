@@ -119,17 +119,20 @@ class MASt3RReconstructor:
                 logger.warning("Not enough frames for MASt3R reconstruction (< 2 after sampling)")
                 return _get_mock_pointcloud(frames_dir)
 
-            # Load images — returns list of dicts with 'img', 'true_shape', etc.
+            # Load images
             images = load_images([str(p) for p in sampled_paths], size=512)
 
-            # Build image pairs — complete scene graph for robustness
+            # Try sparse global alignment (MASt3R-SfM) for proper camera poses
+            try:
+                return self._reconstruct_sfm(images, sampled_paths, sample_interval)
+            except Exception as e:
+                logger.warning(f"MASt3R sparse_global_alignment failed: {e}, falling back to pairwise")
+
+            # Fallback: pairwise inference
             from mast3r.image_pairs import make_pairs
             pairs = make_pairs(images, scene_graph="complete", prefilter=None, symmetrize=True)
-
-            # Run inference
             output = inference(pairs, self.model, self.device, batch_size=settings.batch_size, verbose=False)
 
-            # Extract point cloud and camera poses
             points_3d, colors = self._extract_pointcloud(output, images)
             camera_poses = self._extract_camera_poses(output, images, sample_interval)
 
@@ -137,6 +140,126 @@ class MASt3RReconstructor:
         except Exception as e:
             logger.error(f"MASt3R reconstruction failed: {e}, using mock")
             return _get_mock_pointcloud(frames_dir)
+
+    def _reconstruct_sfm(self, images: list, frame_paths: list,
+                         sample_interval: int) -> tuple[dict, list[dict]]:
+        """Full MASt3R-SfM pipeline with sparse global alignment (bundle adjustment).
+
+        This produces much more accurate camera poses than pairwise inference.
+        """
+        import tempfile
+        from mast3r.image_pairs import make_pairs
+        from mast3r.cloud_opt.sparse_ga import sparse_global_alignment
+
+        # Build pairs with complete scene graph
+        pairs = make_pairs(images, scene_graph="complete", prefilter=None, symmetrize=True)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scene = sparse_global_alignment(
+                imgs=images,
+                pairs_in=pairs,
+                output_dir=tmpdir,
+                model=self.model,
+                device=self.device,
+            )
+
+            # Extract point cloud from scene
+            points_3d, colors = self._extract_scene_pointcloud(scene, images)
+
+            # Extract camera poses from scene
+            camera_poses = self._extract_scene_poses(scene, images, sample_interval)
+
+        return {"points": points_3d.tolist(), "colors": colors.tolist()}, camera_poses
+
+    def _extract_scene_pointcloud(self, scene, images: list) -> tuple[np.ndarray, np.ndarray]:
+        """Extract point cloud from MASt3R scene (after sparse_global_alignment)."""
+        import torch
+
+        all_points = []
+        all_colors = []
+
+        # Scene has pts3d per view
+        for i, view in enumerate(scene.get("pts3d", [])):
+            pts = view if isinstance(view, np.ndarray) else view.cpu().numpy()
+            pts_flat = pts.reshape(-1, 3)
+            valid = np.isfinite(pts_flat).all(axis=1) & (np.abs(pts_flat) < 100).all(axis=1)
+            pts_valid = pts_flat[valid]
+
+            # Get colors
+            if i < len(images):
+                img_data = images[i].get("img")
+                if img_data is not None:
+                    if isinstance(img_data, torch.Tensor):
+                        img_np = img_data.cpu().numpy()
+                    else:
+                        img_np = img_data
+                    if img_np.ndim == 3:
+                        img_flat = img_np.reshape(-1, 3)
+                        if len(img_flat) >= valid.shape[0]:
+                            colors_valid = (img_flat[valid] * 255).clip(0, 255).astype(np.uint8)
+                        else:
+                            colors_valid = np.ones((len(pts_valid), 3), dtype=np.uint8) * 128
+                    else:
+                        colors_valid = np.ones((len(pts_valid), 3), dtype=np.uint8) * 128
+                else:
+                    colors_valid = np.ones((len(pts_valid), 3), dtype=np.uint8) * 128
+            else:
+                colors_valid = np.ones((len(pts_valid), 3), dtype=np.uint8) * 128
+
+            all_points.append(pts_valid)
+            all_colors.append(colors_valid)
+
+        if not all_points:
+            return np.zeros((0, 3)), np.zeros((0, 3))
+
+        points = np.vstack(all_points)
+        colors = np.vstack(all_colors).astype(np.uint8)
+
+        # Downsample
+        max_points = 100000
+        if len(points) > max_points:
+            indices = np.random.choice(len(points), max_points, replace=False)
+            points = points[indices]
+            colors = colors[indices]
+
+        return points, colors
+
+    def _extract_scene_poses(self, scene, images: list,
+                             sample_interval: int) -> list[dict]:
+        """Extract camera poses from MASt3R scene after bundle adjustment."""
+        poses = []
+        h, w = 512, 512
+        K = estimate_intrinsics(w, h)
+
+        # Scene contains camera poses after alignment
+        cameras = scene.get("cameras", [])
+        if not cameras:
+            # Try alternate key
+            cameras = scene.get("views", [])
+
+        for i, cam in enumerate(cameras):
+            if hasattr(cam, "camera_pose"):
+                RT = cam.camera_pose
+            elif isinstance(cam, dict) and "camera_pose" in cam:
+                RT = np.array(cam["camera_pose"])
+            else:
+                RT = np.eye(4)
+
+            R = RT[:3, :3]
+            position = rt_matrix_to_position(R, RT[:3, 3])
+            rotation = rt_matrix_to_quaternion(R)
+
+            poses.append({
+                "frame_idx": i * sample_interval,
+                "intrinsics": K.tolist(),
+                "extrinsics": RT.tolist(),
+                "position": tuple(float(x) for x in position),
+                "rotation": tuple(float(x) for x in rotation),
+            })
+
+        return poses if poses else _get_mock_pointcloud(
+            Path("."), num_frames=len(images)
+        )[1]
 
     def _extract_pointcloud(self, output: dict, images: list) -> tuple[np.ndarray, np.ndarray]:
         """Extract merged point cloud from MASt3R output.

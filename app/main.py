@@ -244,6 +244,8 @@ async def process_upload(
             manifest.add(structured_data.ply_file_path, "Point cloud PLY file (from MASt3R or 3DGS)", "Blender/Unity/All")
         if structured_data.splat_file_path:
             manifest.add(structured_data.splat_file_path, "3D Gaussian Splat binary (UnityGaussianSplatting)", "Unity/UE5")
+        if structured_data.scene_mesh_path:
+            manifest.add(structured_data.scene_mesh_path, "Combined scene mesh with per-object 3D models", "Blender/Unity/UE5")
 
         return {
             "status": "success",
@@ -259,6 +261,8 @@ async def process_upload(
             "exports": export_results,
             "ply_file_path": structured_data.ply_file_path,
             "splat_file_path": structured_data.splat_file_path,
+            "scene_mesh_path": structured_data.scene_mesh_path,
+            "objects_with_mesh": sum(1 for obj in structured_data.objects if obj.mesh_3d),
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
