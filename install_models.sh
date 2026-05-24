@@ -49,7 +49,7 @@ echo "Select models to install (or 'all' for everything):"
 echo ""
 echo "  1) SAM 3 (12-24GB VRAM) — Segmentation + Detection + Tracking"
 echo "  2) OmniParser v2 (8-12GB VRAM) — UI Element Detection"
-echo "  3) DINO-X (4-8GB VRAM) — Open-Vocabulary Detection (SOTA, 56.0 COCO AP)"
+echo "  3) GroundingDINO (4-8GB VRAM) — Open-Vocabulary Detection"
 echo "  4) BoT-SORT (CPU) — Robust Multi-Object Tracking"
 echo "  5) Depth Pro (4-8GB VRAM) — Metric Depth Estimation"
 echo "  6) VGGT (4-8GB VRAM) — 3D Point Cloud Reconstruction (Meta, CVPR 2025)"
@@ -87,13 +87,9 @@ install_omniparser() {
     cd -
 }
 
-install_dino_x() {
+install_grounding_dino() {
     echo ""
-    echo ">>> Installing DINO-X..."
-    try_clone "IDEA-Research/dino-x-api" "$CACHE_DIR/dino-x-api" 2>/dev/null && \
-    cd "$CACHE_DIR/dino-x-api" && \
-    pip install ${PIP_INDEX} -e . && cd - || \
-    echo "DINO-X API install failed, installing Grounding DINO fallback..."
+    echo ">>> Installing GroundingDINO..."
     try_clone "IDEA-Research/GroundingDINO" "$CACHE_DIR/GroundingDINO" 2>/dev/null || true
     cd "$CACHE_DIR/GroundingDINO"
     pip install ${PIP_INDEX} -e .
@@ -142,7 +138,7 @@ install_3dgs() {
 case $choice in
     1) install_sam3 ;;
     2) install_omniparser ;;
-    3) install_dino_x ;;
+    3) install_grounding_dino ;;
     4) install_botsort ;;
     5) install_depth_pro ;;
     6) install_vggt ;;
@@ -150,7 +146,7 @@ case $choice in
     8)
         install_sam3
         install_omniparser
-        install_dino_x
+        install_grounding_dino
         install_botsort
         install_depth_pro
         install_vggt
