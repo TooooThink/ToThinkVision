@@ -1,7 +1,7 @@
-"""DINO-X — open-vocabulary object detection (IDEA Research, 2024).
+"""GroundingDINO — open-vocabulary object detection (IDEA Research).
 
-Upgraded from Grounding DINO: +0.6 COCO AP (56.0 vs 55.4), better on rare classes.
-Grounding DINO kept as fallback if DINO-X is not available.
+Uses transformers-based GroundingDINO with automatic weight download from HuggingFace.
+Official GroundingDINO repo weights used as fallback if HF is unavailable.
 """
 
 from __future__ import annotations
@@ -50,40 +50,27 @@ def _get_mock_detections(img: np.ndarray, mode: str = "general") -> list[dict]:
     return detections
 
 
-class DINOXDetector:
-    """Wrapper for DINO-X open-vocabulary detection.
+class GroundingDINO:
+    """Wrapper for GroundingDINO open-vocabulary detection.
 
-    Supports three backends (tried in order):
-    1. DINO-X official API (dino-x-api package) — highest accuracy
-    2. Grounding DINO HuggingFace — auto-downloads weights
-    3. Grounding DINO official repo — requires .py config + .pth weights
+    Tries two backends (in order):
+    1. HuggingFace transformers — auto-downloads weights
+    2. Grounding DINO official repo — requires .py config + .pth weights
     """
 
     def __init__(self, device: str = "cuda"):
         self.device = device
         self.model = None
-        self._backend = None  # "dinox", "huggingface", "official"
+        self._backend = None  # "huggingface", "official"
         self._init_model()
 
     def _init_model(self):
-        """Load DINO-X detector."""
+        """Load GroundingDINO detector."""
         if settings.mock_mode:
-            logger.info("DINO-X: using mock mode")
+            logger.info("GroundingDINO: using mock mode")
             return
 
-        # Try DINO-X official API first — highest accuracy (56.0 COCO AP)
-        try:
-            import dino_x_api
-            from dino_x_api import DinoXAPI
-
-            self.model = DinoXAPI(model_name="dinox-pro")
-            self._backend = "dinox"
-            logger.info("DINO-X loaded from official API (dinox-pro)")
-            return
-        except (ImportError, Exception) as e:
-            logger.info(f"DINO-X load failed: {e}, trying Grounding DINO fallback")
-
-        # Try HuggingFace Grounding DINO — simpler, auto-downloads weights
+        # Try HuggingFace GroundingDINO — auto-downloads weights
         try:
             import torch
             from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
@@ -95,10 +82,10 @@ class DINOXDetector:
             )
             self.model.to(self.device)
             self._backend = "huggingface"
-            logger.info("DINO-X: using Grounding DINO fallback (HuggingFace)")
+            logger.info("GroundingDINO loaded from HuggingFace (%s)", self.model_id)
             return
         except Exception as e:
-            logger.info(f"HF Grounding DINO load failed: {e}, trying official repo")
+            logger.info(f"HF GroundingDINO load failed: {e}, trying official repo")
 
         # Try official IDEA-Research GroundingDINO
         cache = Path(settings.model_cache_dir)
@@ -107,17 +94,17 @@ class DINOXDetector:
             config_path = cache / "GroundingDINO_SwinT_OGC.py"
 
             if not model_path.exists():
-                logger.warning("Grounding DINO weights not found, falling back to mock")
+                logger.warning("GroundingDINO weights not found, falling back to mock")
                 return
 
             from groundingdino.util.inference import load_model
             self.model = load_model(str(config_path), str(model_path), device=self.device)
             self._backend = "official"
-            logger.info("DINO-X: using Grounding DINO fallback (official repo)")
+            logger.info("GroundingDINO loaded from official repo")
         except ImportError:
             logger.warning("groundingdino package not installed, falling back to mock")
         except Exception as e:
-            logger.warning(f"Grounding DINO load failed: {e}")
+            logger.warning(f"GroundingDINO load failed: {e}")
 
     def detect(self, img: np.ndarray, mode: str = "general",
                custom_prompt: str | None = None) -> list[dict]:
@@ -142,34 +129,13 @@ class DINOXDetector:
             pil_img = PILImage.fromarray(img)
             h, w = img.shape[:2]
 
-            if self._backend == "dinox":
-                return self._detect_dinox(pil_img, prompt, h, w)
-            elif self._backend == "huggingface":
+            if self._backend == "huggingface":
                 return self._detect_hf(pil_img, prompt, h, w)
             else:
                 return self._detect_official(img, prompt)
         except Exception as e:
-            logger.error(f"DINO-X detection failed: {e}, using mock fallback")
+            logger.error(f"GroundingDINO detection failed: {e}, using mock fallback")
             return _get_mock_detections(img, mode)
-
-    def _detect_dinox(self, pil_img, caption: str, h: int, w: int) -> list[dict]:
-        """Detect using DINO-X official API."""
-        results = self.model.predict(image=pil_img, prompt=caption)
-
-        detections = []
-        if results and results.get("boxes"):
-            for box, score, label in zip(
-                results["boxes"], results.get("scores", []), results.get("labels", [])
-            ):
-                # DINO-X returns [x1, y1, x2, y2]
-                x1, y1, x2, y2 = box
-                if score >= settings.detection_threshold:
-                    detections.append({
-                        "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
-                        "label": label,
-                        "confidence": float(score),
-                    })
-        return detections
 
     def _detect_hf(self, pil_img, caption: str, h: int, w: int) -> list[dict]:
         """Detect using HuggingFace transformers API."""
@@ -235,18 +201,15 @@ class DINOXDetector:
         return detections
 
 
-# Backward-compatible alias
-GroundingDINO = DINOXDetector
-
-
-def get_detector() -> DINOXDetector:
+def get_detector() -> GroundingDINO:
     """Get or create detector instance."""
     global _detector
     if _detector is None:
-        _detector = DINOXDetector()
+        _detector = GroundingDINO()
     return _detector
 
 
 def detect_objects(img: np.ndarray, mode: str = "general") -> list[dict]:
     """Convenience function for detection."""
     return get_detector().detect(img, mode)
+

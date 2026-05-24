@@ -225,7 +225,7 @@ def _process_image(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     if config.enable_omniparser and config.mode == "ui":
         model_versions["detection"] = "omniparser"
     elif config.enable_grounding_dino:
-        model_versions["detection"] = "dinox"
+        model_versions["detection"] = "grounding_dino"
     if config.enable_depth_pro:
         model_versions["depth"] = "depth_pro"
 
@@ -467,7 +467,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     if config.enable_omniparser and config.mode == "ui":
         model_versions["detection"] = "omniparser"
     elif config.enable_grounding_dino:
-        model_versions["detection"] = "dinox"
+        model_versions["detection"] = "grounding_dino"
     if config.enable_strongsort:
         model_versions["tracking"] = "botsort"
     if config.enable_depth_pro:

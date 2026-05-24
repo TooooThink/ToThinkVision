@@ -92,7 +92,7 @@ install_grounding_dino() {
     echo ">>> Installing GroundingDINO..."
     try_clone "IDEA-Research/GroundingDINO" "$CACHE_DIR/GroundingDINO" 2>/dev/null || true
     cd "$CACHE_DIR/GroundingDINO"
-    pip install ${PIP_INDEX} -e .
+    pip install ${PIP_INDEX} --no-build-isolation -e .
     cd -
 }
 
