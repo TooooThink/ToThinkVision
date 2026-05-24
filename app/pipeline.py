@@ -20,6 +20,8 @@ from app.exporters.image_exporter import (
     export_mask_with_alpha,
     export_point_cloud_preview,
 )
+from app.models.completion_2d import get_completion_2d
+from app.models.completion_3d import get_completion_3d
 from app.models.depth_pro import DepthPro, get_depth_model
 from app.models.gaussian_splatting import GaussianSplatPipeline, get_splat_pipeline
 from app.models.grounding_dino import GroundingDINO, get_detector
@@ -429,6 +431,62 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         if accumulator.get_accumulated_mask(tid) is not None
     }
 
+    # ─── Stage 2a: 2D Completion (optional) ─────────────────
+    if incomplete_objects and config.enable_completion_2d:
+        logger.info("Stage 2a: Running 2D completion for %d incomplete objects", len(incomplete_objects))
+        completion_2d = get_completion_2d()
+        for obj in final_objects:
+            if obj.id not in incomplete_objects:
+                continue
+            comp_info = incomplete_objects[obj.id]
+            acc_mask = comp_info.get("accumulated_mask")
+            if acc_mask is None:
+                continue
+
+            # Crop the object from the last frame it appeared in
+            bbox = obj.bbox
+            x, y, w, h = int(bbox.x), int(bbox.y), int(bbox.w), int(bbox.h)
+            if w <= 0 or h <= 0:
+                continue
+
+            # Find the last frame where this object was detected
+            last_frame_idx = obj.temporal.frame_index
+            last_frame_path = None
+            for fe in per_frame_obj_data:
+                for oi in fe["objects"]:
+                    if oi["id"] == obj.id and fe["frame_idx"] <= last_frame_idx:
+                        frame_file = frame_paths[fe["frame_idx"]] if fe["frame_idx"] < len(frame_paths) else None
+                        if frame_file:
+                            last_frame_path = frame_file
+
+            if last_frame_path is None or not last_frame_path.exists():
+                continue
+
+            try:
+                from PIL import Image
+                frame_img = np.array(Image.open(last_frame_path).convert("RGB"))
+                crop = frame_img[y:y+h, x:x+w]
+                partial = acc_mask[y:y+h, x:x+w]
+
+                if crop.size == 0 or partial.size == 0:
+                    continue
+
+                completed_img, completed_mask = completion_2d.complete(crop, partial)
+
+                # Update the accumulated mask with completed region
+                completed_full = np.zeros((video_meta["height"], video_meta["width"]), dtype=np.uint8)
+                ch, cw = completed_mask.shape[:2]
+                completed_full[y:y+ch, x:x+cw] = completed_mask
+                accumulated_masks[obj.id] = completed_full
+
+                # Update object's mask_base64
+                completed_base64 = mask_to_base64(completed_mask)
+                obj.mask_base64 = completed_base64
+                obj.temporal.is_complete = True  # Mark as completed
+                logger.info("2D completion applied to %s", obj.id)
+            except Exception as e:
+                logger.warning("2D completion failed for %s: %e", obj.id, e)
+
     # ─── 3D Reconstruction (MASt3R) ─────────────────────────
     pc_data = {"points": [], "colors": []}
     camera_poses = []
@@ -451,6 +509,35 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             camera_poses=camera_poses,
             accumulated_masks=accumulated_masks,
         )
+
+    # ─── Stage 2b: 3D Completion (optional) ─────────────────
+    if incomplete_objects and config.enable_completion_3d and mesh_results:
+        logger.info("Stage 2b: Running 3D completion for incomplete objects")
+        completion_3d = get_completion_3d()
+        for obj in final_objects:
+            if obj.id not in mesh_results:
+                continue
+            if obj.id not in incomplete_objects and obj.temporal.is_complete:
+                continue
+            mdata = mesh_results[obj.id]
+            vertices = np.array(mdata.get("vertices", []))
+            colors = np.array(mdata.get("colors", []))
+            if len(vertices) < 10:
+                continue
+
+            original_count = len(vertices)
+            completed_verts, completed_colors, method = completion_3d.complete(vertices, colors)
+
+            if len(completed_verts) > original_count:
+                mdata["vertices"] = completed_verts.tolist()
+                mdata["colors"] = completed_colors.tolist()
+                mdata["completion_applied"] = True
+                mdata["completion_method"] = method
+                mdata["original_point_count"] = original_count
+                logger.info(
+                    "3D completion applied to %s: %d -> %d points",
+                    obj.id, original_count, len(completed_verts),
+                )
 
     # ─── 3D Gaussian Splatting (optional) ───────────────────
     gs_data = None
@@ -480,6 +567,8 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 point_count=mdata.get("point_count", 0),
                 texture_path=mdata.get("texture_path"),
                 texture_base64=mdata.get("texture_base64"),
+                completion_applied=mdata.get("completion_applied", False),
+                completion_method=mdata.get("completion_method"),
             )
             # Save per-object mesh export path
             if mdata.get("obj_path"):

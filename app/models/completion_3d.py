@@ -69,7 +69,7 @@ class Completion3D:
         colors: np.ndarray,
         bbox_3d: dict | None = None,
         symmetry_axis: str | None = None,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, str]:
         """Complete a partial point cloud.
 
         Args:
@@ -80,9 +80,10 @@ class Completion3D:
                           if None, auto-detected via PCA
 
         Returns:
-            (completed_points, completed_colors):
+            (completed_points, completed_colors, method):
                 completed_points: (M, 3) with predicted points added
                 completed_colors: (M, 3)
+                method: "3d_pvd", "3d_shapeformer", "3d_heuristic"
         """
         if self._backend == "pvd":
             return self._complete_pvd(points, colors)
@@ -96,7 +97,7 @@ class Completion3D:
         points: np.ndarray,
         colors: np.ndarray,
         symmetry_axis: str | None = None,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, str]:
         """Mirror symmetry completion + convex hull fill.
 
         Steps:
@@ -109,7 +110,7 @@ class Completion3D:
         from scipy.spatial import cKDTree
 
         if len(points) < 10:
-            return points, colors
+            return points, colors, "3d_heuristic"
 
         # Step 1: PCA for principal axes
         centroid = points.mean(axis=0)
@@ -187,7 +188,7 @@ class Completion3D:
             except Exception:
                 pass
 
-        return combined_points, combined_colors
+        return combined_points, combined_colors, "3d_heuristic"
 
     def _detect_symmetry_axis(
         self,
@@ -229,7 +230,7 @@ class Completion3D:
         self,
         points: np.ndarray,
         colors: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, str]:
         """Complete using PVD (Point Voxel Diffusion)."""
         # Normalize points to unit sphere
         centroid = points.mean(axis=0)
@@ -251,13 +252,13 @@ class Completion3D:
         _, indices = tree.query(completed, k=1)
         completed_colors = colors[indices]
 
-        return completed, completed_colors
+        return completed, completed_colors, "3d_pvd"
 
     def _complete_shapeformer(
         self,
         points: np.ndarray,
         colors: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, str]:
         """Complete using ShapeFormer."""
         # Similar to PVD: normalize, complete, denormalize
         centroid = points.mean(axis=0)
@@ -275,7 +276,7 @@ class Completion3D:
         _, indices = tree.query(completed, k=1)
         completed_colors = colors[indices]
 
-        return completed, completed_colors
+        return completed, completed_colors, "3d_shapeformer"
 
 
 def get_completion_3d(device: str = "cuda") -> Completion3D:
@@ -290,6 +291,6 @@ def complete_object_3d(
     points: np.ndarray,
     colors: np.ndarray,
     device: str = "cuda",
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, str]:
     """Convenience function for 3D completion."""
     return get_completion_3d(device).complete(points, colors)

@@ -113,6 +113,7 @@ class Mesh3D(BaseModel):
     # Completion tracking (partial object view)
     completion_applied: bool = Field(False, description="Whether generative completion was used")
     completion_method: str | None = Field(None, description="2d_lama, 3d_heuristic, 3d_pvd, or None")
+    original_point_count: int = Field(0, description="Point count before completion")
 
 
 class PSDLayer(BaseModel):
@@ -295,7 +296,7 @@ class PipelineConfig(BaseModel):
     ocr_threshold: float = 0.4
 
     # Partial object view completion
-    enable_completion_2d: bool = False  # LaMa inpainting for 2D mask completion
-    enable_completion_3d: bool = False  # 3D point cloud completion
+    enable_completion_2d: bool = True  # LaMa inpainting for 2D mask completion
+    enable_completion_3d: bool = True  # 3D point cloud completion
     completeness_threshold: float = 0.6  # Below this, flag as incomplete
     detection_frequency: int = 0  # 0 = keyframe-only, N = detect every N frames
