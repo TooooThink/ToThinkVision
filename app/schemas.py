@@ -110,6 +110,10 @@ class Mesh3D(BaseModel):
     # Point cloud this mesh was generated from
     point_count: int = 0
 
+    # Completion tracking (partial object view)
+    completion_applied: bool = Field(False, description="Whether generative completion was used")
+    completion_method: str | None = Field(None, description="2d_lama, 3d_heuristic, 3d_pvd, or None")
+
 
 class PSDLayer(BaseModel):
     """PSD layer specification."""
@@ -131,6 +135,11 @@ class TemporalInfo(BaseModel):
     trajectory: list[dict[str, Any]] = Field(default_factory=list, description="[{x, y, t}] per frame")
     velocity: dict[str, float] | None = None
     depth_per_frame: list[float] = Field(default_factory=list, description="Depth (meters) per frame")
+
+    # Completeness tracking (partial object view detection)
+    completeness_score: float = Field(1.0, description="0.0=fully partial, 1.0=fully observed")
+    is_complete: bool = Field(True, description="Whether object appears fully observed in video")
+    accumulated_mask_frames: int = Field(0, description="Number of frames contributing to mask accumulation")
 
 
 class ObjectRelation(BaseModel):
@@ -284,3 +293,9 @@ class PipelineConfig(BaseModel):
     detection_threshold: float = 0.35
     segmentation_threshold: float = 0.5
     ocr_threshold: float = 0.4
+
+    # Partial object view completion
+    enable_completion_2d: bool = False  # LaMa inpainting for 2D mask completion
+    enable_completion_3d: bool = False  # 3D point cloud completion
+    completeness_threshold: float = 0.6  # Below this, flag as incomplete
+    detection_frequency: int = 0  # 0 = keyframe-only, N = detect every N frames

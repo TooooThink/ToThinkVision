@@ -23,6 +23,7 @@ from app.exporters.image_exporter import (
 from app.models.depth_pro import DepthPro, get_depth_model
 from app.models.gaussian_splatting import GaussianSplatPipeline, get_splat_pipeline
 from app.models.grounding_dino import GroundingDINO, get_detector
+from app.models.mask_accumulator import MaskAccumulator
 from app.models.mast3r import MASt3RReconstructor, get_reconstructor
 from app.models.mesh_reconstruction import reconstruct_object_meshes
 from app.models.omniparser import OmniParser, get_omniparser
@@ -282,7 +283,9 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         img, img_info = preprocess_image(frame_path)
 
         # Detection on first frame (or every N frames)
-        if frame_idx % max(1, int(fps)) == 0:
+        # detection_frequency > 0 overrides the default keyframe cadence
+        detect_interval = config.detection_frequency if config.detection_frequency > 0 else max(1, int(fps))
+        if frame_idx % detect_interval == 0:
             detections = []
             # OmniParser for UI mode
             if config.enable_omniparser and config.mode == "ui":
@@ -384,6 +387,48 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         # Merge propagated masks into tracked objects
         _merge_propagated_masks(all_frame_objects, propagation_results)
 
+    # ─── Stage 1: Multi-frame Mask Accumulation ─────────────
+    accumulator = MaskAccumulator(
+        frame_width=video_meta["width"],
+        frame_height=video_meta["height"],
+    )
+    for frame_entry in per_frame_obj_data:
+        for obj_info in frame_entry["objects"]:
+            if obj_info.get("mask") is not None:
+                accumulator.accumulate(
+                    obj_info["id"], obj_info["mask"], obj_info["bbox"], frame_entry["frame_idx"]
+                )
+
+    # Assess completeness for each tracked object
+    final_objects = list(all_frame_objects.values())
+    incomplete_objects = {}
+    threshold = config.completeness_threshold
+
+    for obj in final_objects:
+        label = obj.label_custom or obj.label.value if hasattr(obj.label, "value") else "object"
+        result = accumulator.get_completeness(obj.id, label=label, threshold=threshold)
+        obj.temporal.completeness_score = result.score
+        obj.temporal.is_complete = result.is_complete
+        obj.temporal.accumulated_mask_frames = result.frames_contributed
+
+        if not result.is_complete:
+            incomplete_objects[obj.id] = {
+                "score": result.score,
+                "accumulated_mask": result.accumulated_mask,
+                "frames": result.frames_contributed,
+            }
+        logger.info(
+            "Object %s: completeness=%.2f (complete=%s, frames=%d)",
+            obj.id, result.score, result.is_complete, result.frames_contributed,
+        )
+
+    # Build dict of accumulated masks for mesh reconstruction
+    accumulated_masks = {
+        tid: accumulator.get_accumulated_mask(tid)
+        for tid in all_frame_objects
+        if accumulator.get_accumulated_mask(tid) is not None
+    }
+
     # ─── 3D Reconstruction (MASt3R) ─────────────────────────
     pc_data = {"points": [], "colors": []}
     camera_poses = []
@@ -404,6 +449,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             frame_height=video_meta["height"],
             output_dir=mesh_dir,
             camera_poses=camera_poses,
+            accumulated_masks=accumulated_masks,
         )
 
     # ─── 3D Gaussian Splatting (optional) ───────────────────
@@ -412,9 +458,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         gs_pipe = get_splat_pipeline()
         gs_data = gs_pipe.train(frame_dir, settings.output_dir / "gs_training")
 
-    # ─── Merge objects (dictionary → list) ──────────────────
-    final_objects = list(all_frame_objects.values())
-
+    # ─── Finalize objects ───────────────────────────────────
     # Compute velocity for tracked objects
     if tracker:
         for obj in final_objects:

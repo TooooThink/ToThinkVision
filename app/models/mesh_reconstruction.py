@@ -29,6 +29,7 @@ def reconstruct_object_meshes(
     frame_height: int,
     output_dir: Path,
     camera_poses: list[dict] | None = None,
+    accumulated_masks: dict[str, np.ndarray] | None = None,
 ) -> dict[str, dict]:
     """Reconstruct per-object 3D meshes from depth maps across video frames.
 
@@ -113,7 +114,14 @@ def reconstruct_object_meshes(
                 continue
 
             obj_depth = depth_map[y:y2, x:x2]
-            obj_mask = mask[y:y2, x:x2] if mask is not None else np.ones((y2 - y, x2 - x), dtype=bool)
+
+            # Use accumulated mask (union of all frames) if available,
+            # otherwise fall back to per-frame mask or full bbox
+            if accumulated_masks and obj_id in accumulated_masks:
+                acc_mask = accumulated_masks[obj_id][y:y2, x:x2]
+                obj_mask = (acc_mask > 0) | (mask[y:y2, x:x2] > 0) if mask is not None else (acc_mask > 0)
+            else:
+                obj_mask = mask[y:y2, x:x2] if mask is not None else np.ones((y2 - y, x2 - x), dtype=bool)
 
             # Back-project to 3D in camera coordinates
             pts_3d_cam = _backproject_object_depth(obj_depth, K, x, y)
