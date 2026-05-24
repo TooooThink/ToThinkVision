@@ -48,7 +48,10 @@ read -p "Enter selection (1-5): " choice
 install_open3d() {
     echo ""
     echo ">>> Installing Open3D..."
-    pip install ${PIP_INDEX} open3d
+    # Prefer conda pre-built (has all C++ deps bundled)
+    conda install -y open3d -c conda-forge 2>/dev/null || \
+        pip install ${PIP_INDEX} open3d || \
+        echo "Open3D install failed. Try: conda install open3d -c conda-forge"
     echo "Open3D installed. Poisson surface reconstruction will now be used."
 }
 
@@ -85,8 +88,15 @@ install_pvd() {
     echo ""
     echo ">>> Installing PVD (Point Voxel Diffusion)..."
 
-    # PVD has complex dependencies — install core deps first
-    pip install ${PIP_INDEX} torch torchvision scipy h5py
+    # Install h5py via conda (pre-built, no compilation needed)
+    echo "Installing h5py via conda (pre-built)..."
+    conda install -y h5py 2>/dev/null || \
+        pip install ${PIP_INDEX} h5py --only-binary :all: 2>/dev/null || \
+        echo "h5py install failed, PVD may not work. Install manually: conda install h5py"
+
+    # PVD requires specific torch version and point-cloud libraries
+    echo "Installing core dependencies..."
+    pip install ${PIP_INDEX} torch torchvision scipy
 
     PVD_DIR="$CACHE_DIR/PVD"
     try_clone "alexzhou907/PVD" "$PVD_DIR" || {
