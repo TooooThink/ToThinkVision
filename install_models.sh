@@ -20,6 +20,12 @@ try_clone() {
     local raw="https://github.com/$1.git"
     local proxy="https://gh-proxy.com/"
 
+    # Skip if already cloned
+    if [ -d "$2/.git" ] || [ -f "$2/setup.py" ] || [ -f "$2/pyproject.toml" ]; then
+        echo "  Already cloned: $1"
+        return 0
+    fi
+
     # Method 1: git clone via proxy
     git clone "${proxy}${raw}" "$2" 2>/dev/null && return 0
 
@@ -65,7 +71,7 @@ install_sam3() {
     fi
     echo "SAM 3/2 installed. Downloading checkpoint..."
     # SAM 3 uses SAM 2.1 as its backbone — no separate SAM 3 weights yet
-    wget -P "$CACHE_DIR" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" || \
+    wget -nc -P "$CACHE_DIR" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt" 2>/dev/null || \
     curl -L -o "$CACHE_DIR/sam2.1_hiera_large.pt" "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
     echo "SAM 3 checkpoint saved to $CACHE_DIR"
 }
