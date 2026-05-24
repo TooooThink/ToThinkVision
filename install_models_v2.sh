@@ -47,11 +47,13 @@ read -p "Enter selection (1-5): " choice
 
 install_open3d() {
     echo ""
-    echo ">>> Installing Open3D..."
-    # Prefer conda pre-built (has all C++ deps bundled)
-    conda install -y open3d -c conda-forge 2>/dev/null || \
-        pip install ${PIP_INDEX} open3d || \
-        echo "Open3D install failed. Try: conda install open3d -c conda-forge"
+    echo ">>> Installing Open3D (CUDA 12.1)..."
+    # Must use conda — login node pip defaults to CPU build
+    # cuda121=1.11.0 ensures GPU build with CUDA 12.1 support
+    conda install -y "open3d=1.11.0=cuda121*" -c open3d-admin -c conda-forge 2>/dev/null || \
+    conda install -y "open3d=1.10.0=cuda121*" -c open3d-admin -c conda-forge 2>/dev/null || \
+    conda install -y open3d -c open3d-admin -c conda-forge 2>/dev/null || \
+    echo "Open3D conda install failed. Try: conda install open3d -c open3d-admin"
     echo "Open3D installed. Poisson surface reconstruction will now be used."
 }
 
