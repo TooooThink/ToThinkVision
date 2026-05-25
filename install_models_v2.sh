@@ -126,8 +126,14 @@ install_pvd() {
             sed '/^$/d' | \
             sed 's/^ *//;s/ *$//' > "$pip_req"
         if [ -s "$pip_req" ]; then
-            echo "Pip packages (no version pins): $(cat "$pip_req" | tr '\n' ' ')"
-            pip install ${PIP_INDEX} -r "$pip_req"
+            # Remove open3d — handled by install_open3d() via conda -c open3d-admin
+            grep -v -E '^open3d$' "$pip_req" > "${pip_req}.tmp" && mv "${pip_req}.tmp" "$pip_req"
+            if [ -s "$pip_req" ]; then
+                echo "Pip packages (no version pins): $(cat "$pip_req" | tr '\n' ' ')"
+                pip install ${PIP_INDEX} -r "$pip_req"
+            else
+                echo "No pip packages remaining after filtering"
+            fi
             rm -f "$pip_req"
         else
             echo "WARNING: Could not extract pip requirements from requirement_voxel.txt"
