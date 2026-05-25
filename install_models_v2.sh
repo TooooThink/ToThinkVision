@@ -114,7 +114,41 @@ install_pvd() {
     if [ -f "requirements.txt" ]; then
         pip install ${PIP_INDEX} -r requirements.txt
     elif [ -f "requirement_voxel.txt" ]; then
-        pip install ${PIP_INDEX} -r requirement_voxel.txt
+        # PVD's requirement_voxel.txt mixes conda: and pip: sections with strict version pins.
+        # Strip all version pins (==, >=, <=, ~=, =) to avoid conflicts with existing packages.
+        echo "Installing PVD dependencies (version pins stripped)..."
+
+        # Pip packages
+        pip_req="/tmp/pvd_pip_req.txt"
+        awk '/^pip:/{found=1; next} /^conda:/{found=0} found && /./ && !/^[a-z]*:/{print}' \
+            requirement_voxel.txt | \
+            sed 's/[><=!~].*//g' | \
+            sed '/^$/d' | \
+            sed 's/^ *//;s/ *$//' > "$pip_req"
+        if [ -s "$pip_req" ]; then
+            echo "Pip packages (no version pins): $(cat "$pip_req" | tr '\n' ' ')"
+            pip install ${PIP_INDEX} -r "$pip_req"
+            rm -f "$pip_req"
+        else
+            echo "WARNING: Could not extract pip requirements from requirement_voxel.txt"
+        fi
+
+        # Conda packages (skip torch/torchvision/cudatoolkit — already installed)
+        conda_req="/tmp/pvd_conda_req.txt"
+        awk '/^conda:/{found=1; next} /^pip:/{found=0} found && /./ && !/^[a-z]*:/{print}' \
+            requirement_voxel.txt | \
+            sed 's/[><=!~].*//g' | \
+            sed '/^$/d' | \
+            sed 's/^ *//;s/ *$//' | \
+            grep -v -E '^(python|torch|torchvision|cudatoolkit)$' > "$conda_req" || true
+        if [ -s "$conda_req" ]; then
+            echo "Conda packages (no version pins, skipping torch/python): $(cat "$conda_req" | tr '\n' ' ')"
+            conda install -y $(cat "$conda_req" | tr '\n' ' ') -c pytorch -c nvidia -c conda-forge 2>/dev/null || \
+                echo "Some conda packages failed to install, continuing..."
+            rm -f "$conda_req"
+        else
+            echo "No conda packages to install"
+        fi
     else
         echo "WARNING: No requirements file found in PVD repo"
     fi
