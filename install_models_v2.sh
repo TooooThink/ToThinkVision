@@ -20,10 +20,11 @@ export HF_ENDPOINT
 try_clone() {
     local raw="https://github.com/$1.git"
     local proxy="https://gh-proxy.com/"
-    if [ -d "$2/.git" ] || [ -f "$2/setup.py" ] || [ -f "$2/pyproject.toml" ]; then
+    if [ -f "$2/requirements.txt" ] || [ -f "$2/setup.py" ] || [ -f "$2/pyproject.toml" ]; then
         echo "  Already cloned: $1"
         return 0
     fi
+    rm -rf "$2" 2>/dev/null || true
     git clone "${proxy}${raw}" "$2" 2>/dev/null && return 0
     curl -fSL "${proxy}${raw%/}/archive/refs/heads/main.zip" -o "$2.zip" && \
     unzip -q "$2.zip" -d "$(dirname "$2")" && \
