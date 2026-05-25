@@ -20,7 +20,8 @@ export HF_ENDPOINT
 try_clone() {
     local raw="https://github.com/$1.git"
     local proxy="https://gh-proxy.com/"
-    if [ -f "$2/requirements.txt" ] || [ -f "$2/setup.py" ] || [ -f "$2/pyproject.toml" ]; then
+    # PVD uses requirement_voxel.txt instead of requirements.txt
+    if [ -f "$2/requirements.txt" ] || [ -f "$2/requirement_voxel.txt" ] || [ -f "$2/setup.py" ] || [ -f "$2/pyproject.toml" ]; then
         echo "  Already cloned: $1"
         return 0
     fi
@@ -110,7 +111,13 @@ install_pvd() {
     }
 
     cd "$PVD_DIR"
-    pip install ${PIP_INDEX} -r requirements.txt
+    if [ -f "requirements.txt" ]; then
+        pip install ${PIP_INDEX} -r requirements.txt
+    elif [ -f "requirement_voxel.txt" ]; then
+        pip install ${PIP_INDEX} -r requirement_voxel.txt
+    else
+        echo "WARNING: No requirements file found in PVD repo"
+    fi
     cd -
 
     # Download PVD checkpoint
