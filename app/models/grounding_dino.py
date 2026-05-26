@@ -104,6 +104,8 @@ class GroundingDINO:
             candidates = [
                 cache / "GroundingDINO" / "groundingdino_swint_ogc.pth",
                 cache / "groundingdino_swint_ogc.pth",
+                cache / "GroundingDINO" / "pytorch_model.bin",
+                cache / "pytorch_model.bin",
             ]
             model_path = None
             for c in candidates:
