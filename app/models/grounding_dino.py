@@ -62,8 +62,7 @@ class GroundingDINO:
         self.device = device
         self.model = None
         self._backend = None  # "huggingface", "official"
-        self.image_processor = None  # used by huggingface backend
-        self.tokenizer = None
+        self.processor = None  # used by huggingface backend
         self._init_model()
 
     def _init_model(self):
@@ -74,20 +73,12 @@ class GroundingDINO:
 
         # Try HuggingFace transformers — uses HF_HOME env var for cache
         try:
-            import os
             import torch
-            from transformers import (
-                AutoImageProcessor,
-                AutoModelForObjectDetection,
-                AutoTokenizer,
-            )
+            from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
             self.model_id = "IDEA-Research/grounding-dino-base"
-            self.image_processor = AutoImageProcessor.from_pretrained(self.model_id)
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-            self.model = AutoModelForObjectDetection.from_pretrained(
-                self.model_id, ignore_mismatched_sizes=True
-            )
+            self.processor = AutoProcessor.from_pretrained(self.model_id)
+            self.model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id)
             self.model.to(self.device)
             self._backend = "huggingface"
             logger.info("GroundingDINO loaded from HuggingFace (%s)", self.model_id)
@@ -175,65 +166,37 @@ class GroundingDINO:
             raise RuntimeError(f"GroundingDINO detection failed: {e}")
 
     def _detect_hf(self, pil_img, caption: str, h: int, w: int) -> list[dict]:
-        """Detect using HuggingFace transformers API with image processor + tokenizer."""
+        """Detect using HuggingFace transformers API."""
         import torch
 
-        # Preprocess: image + text separately
-        inputs = self.image_processor(images=pil_img, return_tensors="pt")
-        text_inputs = self.tokenizer(caption, return_tensors="pt")
-
+        inputs = self.processor(images=pil_img, text=caption, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        text_inputs = {k: v.to(self.device) for k, v in text_inputs.items()}
-        inputs.update(text_inputs)
 
         with torch.no_grad():
             outputs = self.model(**inputs)
 
-        # Post-process: manual grounded detection
-        pred_boxes = outputs.pred_boxes  # [1, num_queries, 4]
-        pred_logits = outputs.logits  # [1, num_queries, num_classes]
-
-        text_threshold = 0.25
-        box_threshold = settings.detection_threshold
-
-        # Get text labels from caption
-        labels = [l.strip() for l in caption.split(" . ") if l.strip()]
+        results = self.processor.post_process_grounded_object_detection(
+            outputs,
+            inputs["input_ids"],
+            box_threshold=settings.detection_threshold,
+            text_threshold=0.25,
+            target_sizes=[(h, w)],
+        )
 
         detections = []
-        boxes = pred_boxes[0].cpu()  # [num_queries, 4] cx, cy, w, h (normalized 0-1)
-        logits = pred_logits[0].cpu()  # [num_queries, num_classes]
+        if results and results[0]:
+            r = results[0]
+            boxes = r["boxes"].cpu().numpy()  # [x1, y1, x2, y2]
+            scores = r["scores"].cpu().numpy()
+            labels = r["labels"]
 
-        # For each query, find the best matching text token
-        num_queries = boxes.shape[0]
-        for i in range(num_queries):
-            box = boxes[i]
-            max_logit = logits[i].max().item()
-            max_idx = logits[i].argmax().item()
-
-            if max_logit < text_threshold:
-                continue
-            if box[2] <= 0 or box[3] <= 0:  # skip degenerate boxes
-                continue
-
-            box_conf = torch.sigmoid(logits[i, max_idx]).item()
-            if box_conf < box_threshold:
-                continue
-
-            # Decode box: cx, cy, w, h (normalized) -> x, y, w, h (pixels)
-            cx, cy, bw, bh = box.tolist()
-            x1 = (cx - bw / 2) * w
-            y1 = (cy - bh / 2) * h
-            x2 = (cx + bw / 2) * w
-            y2 = (cy + bh / 2) * h
-
-            # Map max_idx to label
-            label = labels[max_idx % len(labels)] if labels else "object"
-
-            detections.append({
-                "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
-                "label": label,
-                "confidence": box_conf,
-            })
+            for box, score, label in zip(boxes, scores, labels):
+                x1, y1, x2, y2 = box
+                detections.append({
+                    "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
+                    "label": label,
+                    "confidence": float(score),
+                })
 
         return detections
 
