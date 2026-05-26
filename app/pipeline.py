@@ -254,6 +254,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     # ─── Extract frames (persist to output dir so MASt3R/3DGS can access) ──
     frame_dir = settings.output_dir / f"{file_path.stem}_frames"
     frame_dir.mkdir(parents=True, exist_ok=True)
+    img_dir = _ensure_export_dir(file_path)
     frame_paths, video_meta = extract_frames(file_path, frame_dir)
 
     metadata = VideoMetadata(
