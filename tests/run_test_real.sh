@@ -25,6 +25,17 @@ set -e
 
 mkdir -p logs outputs
 
+# Force correct HF endpoint — hf-mirror.com doesn't resolve on compute nodes
+HF_ENDPOINT="https://huggingface.co"
+export HF_ENDPOINT
+
+# If weights are already cached, skip network checks
+CACHE_DIR="${TTV_MODEL_CACHE_DIR:-$HOME/.cache/tothinkvision}"
+if [ -d "$CACHE_DIR/GroundingDINO" ] || [ -d "$CACHE_DIR/models--IDEA-Research--grounding-dino-base" ]; then
+    echo "Using cached model weights (offline mode)"
+    export HF_HUB_OFFLINE=1
+fi
+
 echo "=== ToThinkVision Real Model Inference ==="
 echo "Start: $(date)"
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
