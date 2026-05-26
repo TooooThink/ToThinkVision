@@ -67,7 +67,7 @@ class DepthPro:
             ckpt_path = Path(settings.model_cache_dir) / "depth_pro" / "depth_pro.pt"
             if ckpt_path.exists():
                 self.model, self.transform = depth_pro.create_model_and_transforms(
-                    ckpt_path_or_model_name=str(ckpt_path)
+                    ckpt_path=str(ckpt_path)
                 )
             else:
                 self.model, self.transform = depth_pro.create_model_and_transforms()
