@@ -44,21 +44,7 @@ class DepthPro:
             logger.info("Depth Pro: using mock mode")
             return
 
-        # Try HuggingFace first (auto-downloads from apple/DepthPro-hf)
-        try:
-            import torch
-            from transformers import DepthProModel, DepthProProcessor
-
-            model_id = "apple/DepthPro-hf"
-            self.processor = DepthProProcessor.from_pretrained(model_id)
-            self.model = DepthProModel.from_pretrained(model_id).to(self.device)
-            self._backend = "huggingface"
-            logger.info("Depth Pro loaded from HuggingFace (apple/DepthPro-hf)")
-            return
-        except Exception as e:
-            logger.info(f"HuggingFace Depth Pro load failed: {e}")
-
-        # Try official Apple package as fallback
+        # Try official Apple package first (checkpoint already downloaded)
         try:
             import depth_pro
             import torch
@@ -83,7 +69,24 @@ class DepthPro:
         except ImportError:
             logger.info("depth_pro package not installed")
 
-        logger.warning("Depth Pro not available, falling back to mock")
+        # Try HuggingFace transformers as fallback
+        try:
+            import torch
+            from transformers import DepthProModel, DepthProProcessor
+
+            model_id = "apple/DepthPro-hf"
+            self.processor = DepthProProcessor.from_pretrained(model_id)
+            self.model = DepthProModel.from_pretrained(model_id).to(self.device)
+            self._backend = "huggingface"
+            logger.info("Depth Pro loaded from HuggingFace (apple/DepthPro-hf)")
+            return
+        except ImportError:
+            raise RuntimeError(
+                "Depth Pro is required but neither the Apple package nor HuggingFace "
+                "transformers are available. Install: pip install git+https://github.com/apple/ml-depth-pro.git"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Depth Pro failed to load: {e}")
 
     def estimate(self, img: np.ndarray, f_px: float | None = None) -> np.ndarray:
         """Estimate metric depth map.
@@ -96,7 +99,7 @@ class DepthPro:
             depth_map: (H, W) depth in meters
         """
         if self.model is None:
-            return _get_mock_depth(img)
+            raise RuntimeError("Depth Pro model not loaded. Set MOCK_MODE=true to allow mock depth.")
 
         try:
             from PIL import Image as PILImage
@@ -122,10 +125,20 @@ class DepthPro:
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
                 with torch.no_grad():
                     outputs = self.model(**inputs)
-                depth = outputs.predicted_depth.squeeze().cpu().numpy()
+                pred = outputs.predicted_depth
+                if isinstance(pred, torch.Tensor):
+                    depth = pred.squeeze().cpu().numpy()
+                elif isinstance(pred, dict):
+                    depth = pred.get("predicted_depth", pred.get("depth", 0))
+                    if isinstance(depth, torch.Tensor):
+                        depth = depth.squeeze().cpu().numpy()
+                    else:
+                        raise ValueError(f"Unexpected predicted_depth type: {type(depth)}")
+                else:
+                    raise ValueError(f"predicted_depth is not a tensor: {type(pred)}")
 
             else:
-                return _get_mock_depth(img)
+                raise RuntimeError("Depth Pro backend not initialized")
 
             # Interpolate to original size if needed
             if depth.shape != (h, w):
@@ -134,8 +147,7 @@ class DepthPro:
 
             return depth.astype(np.float32)
         except Exception as e:
-            logger.error(f"Depth Pro estimation failed: {e}, using mock fallback")
-            return _get_mock_depth(img)
+            raise RuntimeError(f"Depth Pro estimation failed: {e}")
 
     def get_depth_at(self, depth_map: np.ndarray, bbox: list[float]) -> float:
         """Get average depth in bbox region."""

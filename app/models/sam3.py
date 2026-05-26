@@ -105,9 +105,12 @@ class SAM3Predictor:
                 logger.warning(f"SAM 3 video predictor not available: {e}")
 
         except ImportError:
-            logger.warning("sam3 package not installed, falling back to mock mode")
+            raise RuntimeError(
+                "SAM 3 is required but not installed. Install with: "
+                "pip install git+https://github.com/facebookresearch/sam3.git"
+            )
         except Exception as e:
-            logger.warning(f"SAM 3 init failed: {e}, falling back to mock")
+            raise RuntimeError(f"SAM 3 initialization failed: {e}")
 
     def predict(self, img: np.ndarray, text_prompt: str | None = None,
                 boxes: np.ndarray | None = None) -> list[dict]:

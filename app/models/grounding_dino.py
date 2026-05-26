@@ -84,27 +84,12 @@ class GroundingDINO:
             self._backend = "huggingface"
             logger.info("GroundingDINO loaded from HuggingFace (%s)", self.model_id)
             return
-        except Exception as e:
-            logger.info(f"HF GroundingDINO load failed: {e}, trying official repo")
-
-        # Try official IDEA-Research GroundingDINO
-        cache = Path(settings.model_cache_dir)
-        try:
-            model_path = cache / "groundingdino_swint_ogc.pth"
-            config_path = cache / "GroundingDINO_SwinT_OGC.py"
-
-            if not model_path.exists():
-                logger.warning("GroundingDINO weights not found, falling back to mock")
-                return
-
-            from groundingdino.util.inference import load_model
-            self.model = load_model(str(config_path), str(model_path), device=self.device)
-            self._backend = "official"
-            logger.info("GroundingDINO loaded from official repo")
         except ImportError:
-            logger.warning("groundingdino package not installed, falling back to mock")
+            raise RuntimeError(
+                "GroundingDINO requires transformers. Install: pip install transformers"
+            )
         except Exception as e:
-            logger.warning(f"GroundingDINO load failed: {e}")
+            raise RuntimeError(f"GroundingDINO failed to load: {e}")
 
     def detect(self, img: np.ndarray, mode: str = "general",
                custom_prompt: str | None = None) -> list[dict]:
@@ -119,7 +104,7 @@ class GroundingDINO:
             list of {bbox, label, confidence} — bbox as [x, y, w, h]
         """
         if self.model is None:
-            return _get_mock_detections(img, mode)
+            raise RuntimeError("GroundingDINO model not loaded. Set MOCK_MODE=true to allow mock detection.")
 
         prompt = custom_prompt or DETECTION_PROMPTS.get(mode, DETECTION_PROMPTS["general"])
 
@@ -134,8 +119,7 @@ class GroundingDINO:
             else:
                 return self._detect_official(img, prompt)
         except Exception as e:
-            logger.error(f"GroundingDINO detection failed: {e}, using mock fallback")
-            return _get_mock_detections(img, mode)
+            raise RuntimeError(f"GroundingDINO detection failed: {e}")
 
     def _detect_hf(self, pil_img, caption: str, h: int, w: int) -> list[dict]:
         """Detect using HuggingFace transformers API."""

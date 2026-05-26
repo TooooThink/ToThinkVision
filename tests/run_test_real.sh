@@ -140,7 +140,7 @@ if os.path.exists('test_input.mp4'):
     for obj in result.objects:
         print(f'  [{obj.id}] {obj.label}')
         if obj.mesh_3d:
-            print(f'    mesh: {obj.mesh_3d.vertex_count}v / {obj.mesh_3d.face_count}f / texture={obj.mesh_3d.texture_path}')
+            print(f'    mesh: {len(obj.mesh_3d.vertices)}v / {len(obj.mesh_3d.faces)}f / texture={obj.mesh_3d.texture_path}')
         if obj.temporal and obj.temporal.trajectory:
             print(f'    trajectory: {len(obj.temporal.trajectory)} frames')
 
