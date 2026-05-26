@@ -70,28 +70,63 @@ class GroundingDINO:
             logger.info("GroundingDINO: using mock mode")
             return
 
-        # Try HuggingFace GroundingDINO — auto-downloads weights
+        # Try HuggingFace transformers — requires models--* cache structure
         try:
             import torch
             from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
             self.model_id = "IDEA-Research/grounding-dino-base"
-            self.processor = AutoProcessor.from_pretrained(
-                self.model_id, cache_dir=settings.model_cache_dir, local_files_only=True
-            )
+            self.processor = AutoProcessor.from_pretrained(self.model_id)
             self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
-                self.model_id, cache_dir=settings.model_cache_dir, local_files_only=True
+                self.model_id, cache_dir=settings.model_cache_dir
             )
             self.model.to(self.device)
             self._backend = "huggingface"
             logger.info("GroundingDINO loaded from HuggingFace (%s)", self.model_id)
             return
         except ImportError:
-            raise RuntimeError(
-                "GroundingDINO requires transformers. Install: pip install transformers"
-            )
+            logger.info("transformers not available, trying official repo")
         except Exception as e:
-            raise RuntimeError(f"GroundingDINO failed to load: {e}")
+            logger.info(f"HF GroundingDINO load failed: {e}, trying official repo")
+
+        # Try official IDEA-Research GroundingDINO repo
+        cache = Path(settings.model_cache_dir)
+        try:
+            # Look for weights in multiple locations
+            candidates = [
+                cache / "GroundingDINO" / "groundingdino_swint_ogc.pth",
+                cache / "groundingdino_swint_ogc.pth",
+            ]
+            model_path = None
+            for c in candidates:
+                if c.exists():
+                    model_path = c
+                    break
+
+            if model_path is None:
+                raise FileNotFoundError(
+                    f"GroundingDINO weights not found. Searched: {candidates}. "
+                    "Download: https://huggingface.co/IDEA-Research/grounding-dino-base/resolve/main/groundingdino_swint_ogc.pth"
+                )
+
+            config_path = cache / "GroundingDINO" / "groundingdino" / "config" / "GroundingDINO_SwinT_OGC.py"
+            if not config_path.exists():
+                config_path = cache / "GroundingDINO_SwinT_OGC.py"
+
+            from groundingdino.util.inference import load_model
+            self.model = load_model(str(config_path), str(model_path), device=self.device)
+            self._backend = "official"
+            logger.info("GroundingDINO loaded from official repo (%s)", model_path)
+            return
+        except ImportError:
+            logger.info("groundingdino package not installed")
+        except Exception as e:
+            raise RuntimeError(f"GroundingDINO failed to load via official repo: {e}")
+
+        raise RuntimeError(
+            "GroundingDINO is required but could not be loaded. Neither HuggingFace "
+            "transformers nor the official repo weights are available."
+        )
 
     def detect(self, img: np.ndarray, mode: str = "general",
                custom_prompt: str | None = None) -> list[dict]:
