@@ -76,9 +76,11 @@ class GroundingDINO:
             from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
             self.model_id = "IDEA-Research/grounding-dino-base"
-            self.processor = AutoProcessor.from_pretrained(self.model_id)
+            self.processor = AutoProcessor.from_pretrained(
+                self.model_id, cache_dir=settings.model_cache_dir, local_files_only=True
+            )
             self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
-                self.model_id, cache_dir=settings.model_cache_dir
+                self.model_id, cache_dir=settings.model_cache_dir, local_files_only=True
             )
             self.model.to(self.device)
             self._backend = "huggingface"
