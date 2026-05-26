@@ -44,9 +44,10 @@ echo "  2) Depth Pro 权重 (Apple 深度估计)"
 echo "  3) LaMa 权重 (2D 补全)"
 echo "  4) PVD 权重 (3D 点云补全 — 扩散模型)"
 echo "  5) OmniParser v2 权重 (UI 检测)"
-echo "  6) 全部安装"
+echo "  6) GroundingDINO 权重 + bert-base-uncased (检测)"
+echo "  7) 全部安装"
 echo ""
-read -p "Enter selection (1-6): " choice
+read -p "Enter selection (1-7): " choice
 
 install_open3d() {
     echo ""
@@ -260,18 +261,72 @@ except Exception as e:
     echo "OmniParser weights downloaded."
 }
 
+install_grounding_dino_weights() {
+    echo ""
+    echo ">>> Downloading GroundingDINO weights + dependencies..."
+
+    # 1. Download .pth weights
+    WEIGHTS="$CACHE_DIR/GroundingDINO/groundingdino_swint_ogc.pth"
+    mkdir -p "$CACHE_DIR/GroundingDINO"
+
+    if [ ! -f "$WEIGHTS" ]; then
+        echo "Downloading groundingdino_swint_ogc.pth (~380MB)..."
+        if [ "$USE_MIRROR" = "true" ]; then
+            curl -fSL -o "$WEIGHTS" \
+                "https://hf-mirror.com/IDEA-Research/grounding-dino-base/resolve/main/groundingdino_swint_ogc.pth" 2>/dev/null || \
+            curl -fSL -o "$WEIGHTS" \
+                "https://huggingface.co/IDEA-Research/grounding-dino-base/resolve/main/groundingdino_swint_ogc.pth" 2>/dev/null || \
+            echo "GroundingDINO weights download failed."
+        else
+            curl -fSL -o "$WEIGHTS" \
+                "https://huggingface.co/IDEA-Research/grounding-dino-base/resolve/main/groundingdino_swint_ogc.pth" 2>/dev/null || \
+            echo "GroundingDINO weights download failed."
+        fi
+        if [ -f "$WEIGHTS" ]; then
+            echo "GroundingDINO weights saved to $WEIGHTS ($(du -h "$WEIGHTS" | cut -f1))"
+        fi
+    else
+        echo "  GroundingDINO weights already exist: $WEIGHTS"
+    fi
+
+    # 2. Download IDEA-Research/grounding-dino-base via transformers (for HF backend)
+    echo "Downloading IDEA-Research/grounding-dino-base via transformers..."
+    HF_HOME="$CACHE_DIR" python3 -c "
+import os
+os.environ['HF_HOME'] = '$CACHE_DIR'
+from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+AutoProcessor.from_pretrained('IDEA-Research/grounding-dino-base')
+AutoModelForZeroShotObjectDetection.from_pretrained('IDEA-Research/grounding-dino-base')
+print('IDEA-Research/grounding-dino-base cached')
+" 2>/dev/null || echo "  transformers download failed, will rely on official repo"
+
+    # 3. Download bert-base-uncased (required by GroundingDINO official repo tokenizer)
+    echo "Downloading bert-base-uncased (tokenizer dependency)..."
+    HF_HOME="$CACHE_DIR" python3 -c "
+import os
+os.environ['HF_HOME'] = '$CACHE_DIR'
+from transformers import AutoTokenizer, AutoConfig, AutoModel
+AutoTokenizer.from_pretrained('bert-base-uncased')
+AutoConfig.from_pretrained('bert-base-uncased')
+AutoModel.from_pretrained('bert-base-uncased')
+print('bert-base-uncased cached')
+" 2>/dev/null || echo "  bert-base-uncased download failed"
+}
+
 case $choice in
     1) install_open3d ;;
     2) install_depth_pro ;;
     3) install_lama ;;
     4) install_pvd ;;
     5) install_omniparser_weights ;;
-    6)
+    6) install_grounding_dino_weights ;;
+    7)
         install_open3d
         install_depth_pro
         install_lama
         install_pvd
         install_omniparser_weights
+        install_grounding_dino_weights
         ;;
     *) echo "Invalid selection." ;;
 esac
@@ -288,6 +343,7 @@ echo "  Depth Pro → Apple 深度估计（米制深度图）"
 echo "  LaMa     → 2D 图像补全（inpainting，补齐未入镜区域）"
 echo "  PVD      → 3D 点云补全（扩散模型，最优效果）"
 echo "  OmniParser → UI 元素检测（可选，只在 UI 模式需要）"
+echo "  GroundingDINO → 开放词汇检测（权重 + bert-base-uncased）"
 echo ""
 echo "默认已开启（app/schemas.py）："
 echo "  enable_completion_2d = True"

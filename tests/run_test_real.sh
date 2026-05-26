@@ -29,6 +29,14 @@ mkdir -p logs outputs
 HF_ENDPOINT="https://huggingface.co"
 export HF_ENDPOINT
 
+# Offline mode — all models must be pre-downloaded on login node
+export HF_HUB_OFFLINE=1
+
+# Point transformers cache to our model cache
+CACHE_DIR="${TTV_MODEL_CACHE_DIR:-$HOME/.cache/tothinkvision}"
+export HF_HOME="$CACHE_DIR"
+export TRANSFORMERS_CACHE="$CACHE_DIR"
+
 echo "=== ToThinkVision Real Model Inference ==="
 echo "Start: $(date)"
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"

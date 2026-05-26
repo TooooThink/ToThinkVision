@@ -70,16 +70,14 @@ class GroundingDINO:
             logger.info("GroundingDINO: using mock mode")
             return
 
-        # Try HuggingFace transformers — requires models--* cache structure
+        # Try HuggingFace transformers — uses HF_HOME env var for cache
         try:
             import torch
             from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
             self.model_id = "IDEA-Research/grounding-dino-base"
             self.processor = AutoProcessor.from_pretrained(self.model_id)
-            self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
-                self.model_id, cache_dir=settings.model_cache_dir
-            )
+            self.model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id)
             self.model.to(self.device)
             self._backend = "huggingface"
             logger.info("GroundingDINO loaded from HuggingFace (%s)", self.model_id)
