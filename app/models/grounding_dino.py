@@ -111,6 +111,12 @@ class GroundingDINO:
             if not config_path.exists():
                 config_path = cache / "GroundingDINO_SwinT_OGC.py"
 
+            # Point transformers cache to our model cache directory
+            import os
+            os.environ["HF_HOME"] = str(cache)
+            os.environ["TRANSFORMERS_CACHE"] = str(cache)
+            os.environ["HUGGINGFACE_HUB_CACHE"] = str(cache)
+
             from groundingdino.util.inference import load_model
             self.model = load_model(str(config_path), str(model_path), device=self.device)
             self._backend = "official"
