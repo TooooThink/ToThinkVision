@@ -75,7 +75,7 @@ class PSDExporter(BaseExporter):
         # Group objects by frame
         frame_objects: dict[int, list] = {}
         for obj in data.objects:
-            fi = obj.temporal.frame_index
+            fi = obj.temporal.frame_index if obj.temporal else 0
             if fi not in frame_objects:
                 frame_objects[fi] = []
             frame_objects[fi].append(obj)

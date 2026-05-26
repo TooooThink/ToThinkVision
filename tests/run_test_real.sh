@@ -96,15 +96,15 @@ if os.path.exists('test_input.png'):
     print(f'Objects: {len(result.objects)}')
     for obj in result.objects:
         print(f'  [{obj.id}] {obj.label}')
-        print(f'    bbox_2d: {obj.bbox_2d}')
+        print(f'    bbox: {obj.bbox}')
         if obj.mask_base64:
             print(f'    mask: yes (base64, {len(obj.mask_base64)} chars)')
         if obj.crop_png_path:
             print(f'    crop_png: {obj.crop_png_path}')
         elif obj.crop_image_base64:
             print(f'    crop: yes (base64, {len(obj.crop_image_base64)} chars)')
-        if obj.temporal_data:
-            print(f'    trajectory: {len(obj.temporal_data)} frames')
+        if obj.temporal and obj.temporal.trajectory:
+            print(f'    trajectory: {len(obj.temporal.trajectory)} frames')
 
     print()
     print('── Exports ──')
@@ -141,8 +141,8 @@ if os.path.exists('test_input.mp4'):
         print(f'  [{obj.id}] {obj.label}')
         if obj.mesh_3d:
             print(f'    mesh: {obj.mesh_3d.vertex_count}v / {obj.mesh_3d.face_count}f / texture={obj.mesh_3d.texture_path}')
-        if obj.temporal_data:
-            print(f'    trajectory: {len(obj.temporal_data)} frames')
+        if obj.temporal and obj.temporal.trajectory:
+            print(f'    trajectory: {len(obj.temporal.trajectory)} frames')
 
     print()
     print('── Exports ──')
