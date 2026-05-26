@@ -66,8 +66,11 @@ class DepthPro:
             # Use cached checkpoint if available, otherwise default path
             ckpt_path = Path(settings.model_cache_dir) / "depth_pro" / "depth_pro.pt"
             if ckpt_path.exists():
+                config = depth_pro.DEFAULT_MONODEPTH_CONFIG_DICT
+                import dataclasses
+                config = dataclasses.replace(config, checkpoint_uri=str(ckpt_path))
                 self.model, self.transform = depth_pro.create_model_and_transforms(
-                    ckpt_path=str(ckpt_path)
+                    config=config
                 )
             else:
                 self.model, self.transform = depth_pro.create_model_and_transforms()
