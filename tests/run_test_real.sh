@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=ttv_real
-#SBATCH --partition=gpu
+#SBATCH --partition=a100
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=02:00:00
-#SBATCH --output=ttv_real_%j.out
-#SBATCH --error=ttv_real_%j.err
+#SBATCH --output=logs/ttv_real_%j.out
+#SBATCH --error=logs/ttv_real_%j.err
 
 # ============================================================================
 # ToThinkVision — Real Model Inference Test
@@ -22,6 +22,8 @@
 # ============================================================================
 
 set -e
+
+mkdir -p logs outputs
 
 echo "=== ToThinkVision Real Model Inference ==="
 echo "Start: $(date)"
