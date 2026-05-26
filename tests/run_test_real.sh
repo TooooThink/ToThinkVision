@@ -60,6 +60,7 @@ echo ""
 echo "── Starting real model inference ──"
 python -c "
 import time, os, sys
+from pathlib import Path
 
 os.environ['MOCK_MODE'] = 'false'
 
@@ -88,7 +89,7 @@ if os.path.exists('test_input.png'):
         enable_completion_3d=False,
         mode='general',
     )
-    result = process_file('test_input.png', mode='image', config=config_2d)
+    result = process_file(Path('test_input.png'), mode='image', config=config_2d)
     elapsed = time.time() - start
 
     print(f'Duration: {elapsed:.1f}s')
@@ -128,7 +129,7 @@ if os.path.exists('test_input.mp4'):
     from app.exporters.game_exporter import GameExporter
 
     start = time.time()
-    result = process_file('test_input.mp4', mode='video')
+    result = process_file(Path('test_input.mp4'), mode='video')
     elapsed = time.time() - start
 
     print(f'Duration: {elapsed:.1f}s')
