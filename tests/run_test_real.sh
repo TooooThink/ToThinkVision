@@ -64,65 +64,69 @@ import time, os, sys
 os.environ['MOCK_MODE'] = 'false'
 
 from app.pipeline import process_file
-from app.exporters.gltf_exporter import GltfExporter
-from app.exporters.obj_exporter import ObjExporter
-from app.exporters.game_exporter import GameExporter
+from app.schemas import PipelineConfig
+from app.exporters.psd_exporter import PSDExporter
+from app.schemas import ExportFormat
 
-# ── Test 1: Image ──
+# ── Test 1: Image — 2D path (detect + segment + LaMa completion + PSD) ──
 if os.path.exists('test_input.png'):
     print('='*60)
-    print('TEST 1: Image — test_input.png')
+    print('TEST 1: Image — 2D path — test_input.png')
     print('='*60)
     start = time.time()
-    result = process_file('test_input.png', mode='image')
+
+    # 2D-only config: skip depth, 3D reconstruction, mesh
+    config_2d = PipelineConfig(
+        enable_sam3=True,
+        enable_grounding_dino=True,
+        enable_omniparser=False,
+        enable_depth_pro=False,
+        enable_mast3r=False,
+        enable_3d_reconstruction=False,
+        enable_gaussian_splatting=False,
+        enable_completion_2d=True,   # LaMa inpainting for occluded regions
+        enable_completion_3d=False,
+        mode='general',
+    )
+    result = process_file('test_input.png', mode='image', config=config_2d)
     elapsed = time.time() - start
 
     print(f'Duration: {elapsed:.1f}s')
     print(f'Objects: {len(result.objects)}')
-    print(f'Point cloud: {len(result.point_cloud.points) if result.point_cloud else 0} points')
-    print(f'Camera poses: {len(result.camera_poses)} frames')
-    print(f'Gaussian splats: {\"yes\" if result.gaussian_splats else \"no\"}')
-
     for obj in result.objects:
         print(f'  [{obj.id}] {obj.label}')
         print(f'    bbox_2d: {obj.bbox_2d}')
-        if obj.mesh_3d:
-            print(f'    mesh: {obj.mesh_3d.vertex_count} verts, {obj.mesh_3d.face_count} faces')
-            print(f'    UV coords: {\"yes\" if obj.mesh_3d.uv_coords else \"no\"}')
-            print(f'    texture: {obj.mesh_3d.texture_path}')
-            print(f'    texture size: {obj.mesh_3d.texture_size}')
-            print(f'    bounds: {obj.mesh_3d.bounds}')
+        if obj.mask_base64:
+            print(f'    mask: yes (base64, {len(obj.mask_base64)} chars)')
+        if obj.crop_png_path:
+            print(f'    crop_png: {obj.crop_png_path}')
+        elif obj.crop_image_base64:
+            print(f'    crop: yes (base64, {len(obj.crop_image_base64)} chars)')
         if obj.temporal_data:
             print(f'    trajectory: {len(obj.temporal_data)} frames')
 
     print()
     print('── Exports ──')
 
-    print('Exporting glTF...')
+    print('Exporting PSD (static, each object = layer)...')
     t0 = time.time()
-    p = GltfExporter().export(result)
+    p = PSDExporter(fmt=ExportFormat.PSD_STATIC).export(result)
     print(f'  -> {p} ({time.time()-t0:.1f}s)')
 
-    print('Exporting OBJ+MTL...')
-    t0 = time.time()
-    p = ObjExporter().export(result)
-    print(f'  -> {p} ({time.time()-t0:.1f}s)')
-
-    print('Exporting Unity JSON...')
-    t0 = time.time()
-    p = GameExporter().export_unity(result)
-    print(f'  -> {p} ({time.time()-t0:.1f}s)')
-
-    print(f'\\nImage test DONE in {elapsed:.1f}s')
+    print(f'\\nImage 2D test DONE in {elapsed:.1f}s')
 else:
     print('SKIPPED: test_input.png not found')
 
-# ── Test 2: Video ──
+# ── Test 2: Video — 3D path (full pipeline) ──
 if os.path.exists('test_input.mp4'):
     print()
     print('='*60)
-    print('TEST 2: Video — test_input.mp4')
+    print('TEST 2: Video — 3D path — test_input.mp4')
     print('='*60)
+    from app.exporters.gltf_exporter import GltfExporter
+    from app.exporters.obj_exporter import ObjExporter
+    from app.exporters.game_exporter import GameExporter
+
     start = time.time()
     result = process_file('test_input.mp4', mode='video')
     elapsed = time.time() - start
@@ -148,7 +152,12 @@ if os.path.exists('test_input.mp4'):
     p = ObjExporter().export(result)
     print(f'  -> {p}')
 
-    print(f'\\nVideo test DONE in {elapsed:.1f}s')
+    # Also export PSD for video (each frame = group, each object = layer)
+    print('Exporting PSD (animated, frame groups)...')
+    p = PSDExporter(fmt=ExportFormat.PSD_ANIMATED).export(result)
+    print(f'  -> {p}')
+
+    print(f'\\nVideo 3D test DONE in {elapsed:.1f}s')
 else:
     print()
     print('SKIPPED: test_input.mp4 not found')
