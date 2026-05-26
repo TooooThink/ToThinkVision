@@ -40,12 +40,13 @@ echo "  ToThinkVision v2 — 新增依赖安装"
 echo "=========================================="
 echo ""
 echo "  1) Open3D (Poisson 高质量网格重建)"
-echo "  2) LaMa 权重 (2D 补全)"
-echo "  3) PVD 权重 (3D 点云补全 — 扩散模型)"
-echo "  4) OmniParser v2 权重 (UI 检测)"
-echo "  5) 全部安装"
+echo "  2) Depth Pro 权重 (Apple 深度估计)"
+echo "  3) LaMa 权重 (2D 补全)"
+echo "  4) PVD 权重 (3D 点云补全 — 扩散模型)"
+echo "  5) OmniParser v2 权重 (UI 检测)"
+echo "  6) 全部安装"
 echo ""
-read -p "Enter selection (1-5): " choice
+read -p "Enter selection (1-6): " choice
 
 install_open3d() {
     echo ""
@@ -57,6 +58,38 @@ install_open3d() {
     conda install -y open3d -c open3d-admin -c conda-forge 2>/dev/null || \
     echo "Open3D conda install failed. Try: conda install open3d -c open3d-admin"
     echo "Open3D installed. Poisson surface reconstruction will now be used."
+}
+
+install_depth_pro() {
+    echo ""
+    echo ">>> Downloading Depth Pro weights (Apple, ~1.8GB)..."
+
+    # Install from source
+    echo "Installing depth_pro from GitHub..."
+    pip install ${PIP_INDEX} git+https://github.com/apple/ml-depth-pro.git 2>/dev/null || \
+    pip install ${PIP_INDEX} git+https://gh-proxy.com/https://github.com/apple/ml-depth-pro.git 2>/dev/null || \
+    echo "depth_pro install failed, will try HuggingFace fallback"
+
+    # Pre-download checkpoint to model cache
+    CKPT_DIR="$CACHE_DIR/depth_pro"
+    mkdir -p "$CKPT_DIR"
+
+    echo "Downloading depth_pro.pt..."
+    if [ "$USE_MIRROR" = "true" ]; then
+        curl -fSL -o "$CKPT_DIR/depth_pro.pt" \
+            "https://hf-mirror.com/apple/DepthPro/resolve/main/depth_pro.pt" 2>/dev/null || \
+        curl -fSL -o "$CKPT_DIR/depth_pro.pt" \
+            "https://huggingface.co/apple/DepthPro/resolve/main/depth_pro.pt" 2>/dev/null || \
+        echo "Depth Pro weights download failed, will auto-download on first use."
+    else
+        curl -fSL -o "$CKPT_DIR/depth_pro.pt" \
+            "https://huggingface.co/apple/DepthPro/resolve/main/depth_pro.pt" 2>/dev/null || \
+        echo "Depth Pro weights download failed, will auto-download on first use."
+    fi
+
+    if [ -f "$CKPT_DIR/depth_pro.pt" ]; then
+        echo "Depth Pro weights saved to $CKPT_DIR/depth_pro.pt ($(du -h "$CKPT_DIR/depth_pro.pt" | cut -f1))"
+    fi
 }
 
 install_lama() {
@@ -229,11 +262,13 @@ except Exception as e:
 
 case $choice in
     1) install_open3d ;;
-    2) install_lama ;;
-    3) install_pvd ;;
-    4) install_omniparser_weights ;;
-    5)
+    2) install_depth_pro ;;
+    3) install_lama ;;
+    4) install_pvd ;;
+    5) install_omniparser_weights ;;
+    6)
         install_open3d
+        install_depth_pro
         install_lama
         install_pvd
         install_omniparser_weights
@@ -249,6 +284,7 @@ echo ""
 echo "新增模块说明："
 echo ""
 echo "  Open3D   → Poisson 网格重建（质量远超 alpha shape）"
+echo "  Depth Pro → Apple 深度估计（米制深度图）"
 echo "  LaMa     → 2D 图像补全（inpainting，补齐未入镜区域）"
 echo "  PVD      → 3D 点云补全（扩散模型，最优效果）"
 echo "  OmniParser → UI 元素检测（可选，只在 UI 模式需要）"

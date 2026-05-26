@@ -44,20 +44,7 @@ class DepthPro:
             logger.info("Depth Pro: using mock mode")
             return
 
-        # Try official Apple package first
-        try:
-            import depth_pro
-            import torch
-
-            self.model, self.transform = depth_pro.create_model_and_transforms()
-            self.model.eval().to(self.device, dtype=torch.float32)
-            self._backend = "apple"
-            logger.info("Depth Pro loaded from official Apple package")
-            return
-        except ImportError:
-            logger.info("depth_pro package not installed, trying HuggingFace")
-
-        # Try HuggingFace transformers
+        # Try HuggingFace first (auto-downloads from apple/DepthPro-hf)
         try:
             import torch
             from transformers import DepthProModel, DepthProProcessor
@@ -66,10 +53,30 @@ class DepthPro:
             self.processor = DepthProProcessor.from_pretrained(model_id)
             self.model = DepthProModel.from_pretrained(model_id).to(self.device)
             self._backend = "huggingface"
-            logger.info("Depth Pro loaded from HuggingFace (DepthPro-hf)")
+            logger.info("Depth Pro loaded from HuggingFace (apple/DepthPro-hf)")
             return
         except Exception as e:
-            logger.warning(f"HuggingFace Depth Pro load failed: {e}")
+            logger.info(f"HuggingFace Depth Pro load failed: {e}")
+
+        # Try official Apple package as fallback
+        try:
+            import depth_pro
+            import torch
+
+            # Use cached checkpoint if available, otherwise default path
+            ckpt_path = settings.model_cache_dir / "depth_pro" / "depth_pro.pt"
+            if ckpt_path.exists():
+                self.model, self.transform = depth_pro.create_model_and_transforms(
+                    ckpt_path_or_model_name=str(ckpt_path)
+                )
+            else:
+                self.model, self.transform = depth_pro.create_model_and_transforms()
+            self.model.eval().to(self.device, dtype=torch.float32)
+            self._backend = "apple"
+            logger.info("Depth Pro loaded from official Apple package")
+            return
+        except ImportError:
+            logger.info("depth_pro package not installed")
 
         logger.warning("Depth Pro not available, falling back to mock")
 
