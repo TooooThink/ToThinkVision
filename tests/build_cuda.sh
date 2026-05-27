@@ -14,5 +14,7 @@ export PATH=$CUDA_HOME/bin:$PATH
 export TORCH_CUDA_ARCH_LIST="8.0;8.6"
 
 cd /public/home/xlwang/.cache/tothinkvision/GroundingDINO
-python setup.py build develop
+
+# 只编译 C++ 扩展，不触发 pip 安装
+python setup.py build_ext --inplace
 echo "Build complete"
