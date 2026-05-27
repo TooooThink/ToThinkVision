@@ -55,6 +55,13 @@ conda activate ttv 2>/dev/null || conda activate base
 echo "Python: $(which python)"
 echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'N/A')"
 
+# Add PyTorch lib to LD_LIBRARY_PATH (needed for GroundingDINO _C extension)
+TORCH_LIB="$(python -c 'import torch; import os; print(os.path.join(os.path.dirname(torch.__file__), "lib"))' 2>/dev/null)"
+if [ -n "$TORCH_LIB" ] && [ -d "$TORCH_LIB" ]; then
+    export LD_LIBRARY_PATH="$TORCH_LIB:$LD_LIBRARY_PATH"
+    echo "Added $TORCH_LIB to LD_LIBRARY_PATH"
+fi
+
 # ── Check model weights ──
 echo ""
 echo "── Checking model weights ──"
