@@ -77,11 +77,19 @@ class SAM3Predictor:
             # Official SAM 3 API — unified entry point
             from sam3.model_builder import build_sam3_image_model
 
+            # Use SAM 3.1 weights from local cache (HF is gated + GPU nodes offline)
+            cache = Path(settings.model_cache_dir)
+            ckpt_v31 = cache / "sam3.1" / "sam3.1_multiplex.pt"
+            ckpt_v3 = cache / "sam3.pt"
+            ckpt = str(ckpt_v31 if ckpt_v31.exists() else ckpt_v3)
+
             self._model = build_sam3_image_model(
                 device=self.device,
-                load_from_HF=True,
+                checkpoint_path=ckpt if Path(ckpt).exists() else None,
+                load_from_HF=not Path(ckpt).exists(),
                 enable_inst_interactivity=True,
                 enable_segmentation=True,
+                version="sam3.1" if ckpt_v31.exists() else "sam3",
             )
 
             # Get the interactive predictor attached to the model
@@ -98,7 +106,9 @@ class SAM3Predictor:
 
                 self.video_predictor = build_sam3_video_predictor(
                     device=self.device,
-                    load_from_HF=True,
+                    checkpoint_path=ckpt if Path(ckpt).exists() else None,
+                    load_from_HF=not Path(ckpt).exists(),
+                    version="sam3.1" if ckpt_v31.exists() else "sam3",
                 )
                 logger.info("SAM 3 video predictor loaded")
             except Exception as e:
