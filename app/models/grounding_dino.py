@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """GroundingDINO — open-vocabulary object detection (IDEA Research).
 
 Uses transformers-based GroundingDINO with automatic weight download from HuggingFace.
