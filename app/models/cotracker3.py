@@ -58,16 +58,35 @@ class CoTracker3Predictor:
             return
 
         try:
+            import os
+
+            # Prefer local repo (avoids torch.hub GitHub download failures in China)
+            local_repo = os.environ.get("COTRACKER_REPO")
             if self.checkpoint_path and Path(self.checkpoint_path).exists():
                 # Load from local checkpoint
-                self.model = torch.hub.load(
-                    "facebookresearch/co-tracker",
-                    f"cotracker3_{self.mode}",
-                ).to(self.device)
+                if local_repo and Path(local_repo).exists():
+                    self.model = torch.hub.load(
+                        local_repo,
+                        f"cotracker3_{self.mode}",
+                        source="local",
+                    ).to(self.device)
+                else:
+                    self.model = torch.hub.load(
+                        "facebookresearch/co-tracker",
+                        f"cotracker3_{self.mode}",
+                    ).to(self.device)
                 state_dict = torch.load(self.checkpoint_path, map_location=self.device)
                 self.model.load_state_dict(state_dict)
+            elif local_repo and Path(local_repo).exists():
+                # Load from local clone (torch.hub source='local' — no GitHub download)
+                self.model = torch.hub.load(
+                    local_repo,
+                    f"cotracker3_{self.mode}",
+                    source="local",
+                ).to(self.device)
+                logger.info("CoTracker3 loaded from local repo: %s", local_repo)
             else:
-                # Load via torch.hub (auto-downloads weights)
+                # Load via torch.hub (auto-downloads weights + repo zip from GitHub)
                 self.model = torch.hub.load(
                     "facebookresearch/co-tracker",
                     f"cotracker3_{self.mode}",

@@ -110,20 +110,66 @@ read -r -p "Your choice [0-5]: " CHOICE
 install_cotracker3() {
     echo ""
     echo "=== Installing CoTracker3 ==="
-    # CoTracker3 is loaded via torch.hub — just needs to be cached
+    # CoTracker3 通过 torch.hub 加载，但 torch.hub 会直连 GitHub（国内不稳）
+    # 解决方案：先手动 clone 仓库，然后用 source='local' 加载
+
+    local repo_dest="$REPOS_DIR/co-tracker"
+
+    # Step 1: Clone repo
+    if ! try_clone "facebookresearch/co-tracker" "$repo_dest"; then
+        echo "  ❌ Failed to clone CoTracker3"
+        return 1
+    fi
+
+    cd "$repo_dest"
+
+    # Step 2: Install dependencies (requirements.txt + optional CUDA extensions)
+    if [ -f "requirements.txt" ]; then
+        echo "  Installing CoTracker3 dependencies..."
+        pip install $PIP_INDEX -r requirements.txt 2>&1 | tail -3 || true
+    fi
+
+    # Step 3: Download pretrained weights from HuggingFace (走 hf-mirror 镜像)
+    local weights_dir="$CACHE_DIR/CoTracker3"
+    mkdir -p "$weights_dir"
+    local weights_url="${HF_ENDPOINT}/facebook/cotracker3/resolve/main/cotracker3_offline.pth"
+    local weights_dest="$weights_dir/cotracker3_offline.pth"
+    download_weights "$weights_url" "$weights_dest" 2>/dev/null || \
+        echo "  ⚠ Offline weights download skipped"
+    local weights_url_online="${HF_ENDPOINT}/facebook/cotracker3/resolve/main/cotracker3_online.pth"
+    local weights_dest_online="$weights_dir/cotracker3_online.pth"
+    download_weights "$weights_url_online" "$weights_dest_online" 2>/dev/null || \
+        echo "  ⚠ Online weights download skipped"
+
+    # Step 4: 验证加载（用 source='local' 避免再次下载 zip）
+    echo "  Verifying CoTracker3 load (source=local)..."
     python -c "
-import torch
-print('Downloading CoTracker3 offline model...')
+import sys
+sys.path.insert(0, '$repo_dest')
 try:
-    model = torch.hub.load('facebookresearch/co-tracker', 'cotracker3_offline')
-    print('  ✓ CoTracker3 offline cached')
-    model = torch.hub.load('facebookresearch/co-tracker', 'cotracker3_online')
-    print('  ✓ CoTracker3 online cached')
+    import torch
+    # 方式1: source='local' 直接用本地仓库
+    model = torch.hub.load('$repo_dest', 'cotracker3_offline', source='local')
+    print('  ✓ CoTracker3 offline loaded (local)')
 except Exception as e:
-    print(f'  ⚠ torch.hub failed: {e}')
+    print(f'  ⚠ Load failed: {e}')
     print('  Will fall back to mock mode at runtime.')
 " 2>&1 || true
-    echo "  Done."
+
+    echo ""
+    echo "  ✓ CoTracker3 installed at: $repo_dest"
+    echo ""
+    echo "  Add to your shell profile:"
+    echo "    export COTRACKER_REPO=\"$repo_dest\""
+    echo ""
+
+    if [ -t 0 ]; then
+        read -r -p "  Auto-add to ~/.bashrc? [y/N]: " CONFIRM
+        if [[ "$CONFIRM" =~ ^[Yy] ]]; then
+            echo "export COTRACKER_REPO=\"$repo_dest\"" >> "$HOME/.bashrc"
+            echo "  Added. Run 'source ~/.bashrc' or open a new shell."
+        fi
+    fi
 }
 
 install_objectgs() {
