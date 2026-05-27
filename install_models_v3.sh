@@ -17,13 +17,16 @@ REPOS_DIR="${MODEL_REPOS_DIR:-$HOME/.local/share/tothinkvision/repos}"
 mkdir -p "$CACHE_DIR" "$REPOS_DIR"
 
 # ─── Mirror helpers (China / proxy) ──────────────────────────
-if [ "$USE_MIRROR" = "true" ]; then
-    PIP_INDEX="-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
-    HF_ENDPOINT="https://hf-mirror.com"
-    echo "  Mirror mode: Tsinghua PyPI + hf-mirror.com"
-else
+# Default: USE_MIRROR=true (always use mirrors for mainland China)
+# Set USE_MIRROR=false to disable (direct GitHub + huggingface.co)
+if [ "${USE_MIRROR:-true}" = "false" ]; then
     PIP_INDEX=""
     HF_ENDPOINT="https://huggingface.co"
+else
+    PIP_INDEX="-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
+    HF_ENDPOINT="https://hf-mirror.com"
+    echo "  Mirror mode ON (default): Tsinghua PyPI + hf-mirror.com + gh-proxy.com"
+    echo "  Set USE_MIRROR=false to use direct connections instead."
 fi
 export HF_ENDPOINT
 
@@ -155,8 +158,8 @@ echo ""
 echo "  5) ALL of the above (~18GB total)"
 echo "  0) Exit"
 echo ""
-echo "Tip: set USE_MIRROR=true before running for mainland China mirrors"
-echo "     (uses hf-mirror.com + gh-proxy.com + Tsinghua PyPI)"
+echo "Note: Mirrors are enabled by default (hf-mirror.com + gh-proxy.com + Tsinghua PyPI)"
+echo "      Set USE_MIRROR=false to use direct connections instead"
 echo ""
 
 read -r -p "Your choice [0-5]: " CHOICE
@@ -228,61 +231,82 @@ install_cotracker3() {
 
     # Step 4: Verify installation
     #
-    # 关键：始终传 checkpoint_path（即使为空字符串 → Python 中 or None → 不传参）
-    # 这样 hubconf.py 不会触发自己的 huggingface.co 下载
-    # 如果权重文件不存在，会直接报错（不会悄悄走外网）
+    # 关键：只在权重文件存在时才尝试加载
+    # - 权重存在 → 传 checkpoint_path，hubconf.py 直接用本地文件，不下载
+    # - 权重不存在 → 不加载，避免 hubconf.py 触发 huggingface.co 下载（外网）
     #
-    echo ""
-    echo "  === Verifying CoTracker3 installation ==="
-
     export COTRACKER_REPO="$repo_dest"
     local ckpt_path=""
     if [ -f "$offline_weights" ]; then
         ckpt_path="$offline_weights"
-        echo "  Found local weights: $offline_weights"
-    else
-        echo "  ⚠ Weights not found at $offline_weights"
-        echo "    → Verification will fail (hubconf.py download disabled to avoid foreign network)"
     fi
 
     python -c "
 import os, sys
 sys.path.insert(0, '$repo_dest')
-ckpt = '''$ckpt_path''' or None
+
+ckpt_path = '$ckpt_path'.strip()
+if not ckpt_path or not os.path.isfile(ckpt_path):
+    ckpt_path = None
+
+print()
+print('  === Verifying CoTracker3 installation ===')
+print(f'  Repo: $repo_dest')
+print(f'  Weights: {ckpt_path or \"(none)\"}')
+print()
+
+# Step 1: Check if repo and dependencies are OK
 try:
     import torch
-    kwargs = {'checkpoint_path': ckpt} if ckpt else {}
-    model = torch.hub.load('$repo_dest', 'cotracker3_offline', source='local', **kwargs)
-    print('  ✓ CoTracker3 offline loaded successfully')
-    if ckpt:
-        print(f'    Weights: {ckpt}')
-    else:
-        print('    (no local weights — loaded with hubconf default)')
-except Exception as e:
-    print(f'  ⚠ Load failed: {e}')
-    if not ckpt:
-        print()
-        print('  原因: 权重未下载，且 hubconf.py 尝试从 huggingface.co 下载（外网不可达）')
-        print()
-        print('  解决方案 — 在有外网的机器下载后 scp 到本节点:')
-        print('    # 在有网机器:')
-        print('    wget https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth \\')
-        print('         -O $weights_dir/scaled_offline.pth')
-        print('    wget https://huggingface.co/facebook/cotracker3/resolve/main/scaled_online.pth \\')
-        print('         -O $weights_dir/scaled_online.pth')
-        print()
-        print('    # scp 到集群:')
-        print('    scp $weights_dir/*.pth cluster:$weights_dir/')
-        print()
-        print('  或使用 huggingface-cli（需要 HF_TOKEN）:')
-        print('    huggingface-cli download facebook/cotracker3 --local-dir $weights_dir')
-    else:
-        print()
-        print('  权重文件存在但加载失败，检查:')
-        print('    - 文件是否完整（可能下载中断）: ls -lh $offline_weights')
-        print('    - requirements.txt 依赖是否装全: pip install -r $repo_dest/requirements.txt')
+    print('  ✓ PyTorch available')
+except ImportError:
+    print('  ❌ PyTorch not installed')
+    print('    Install: pip install torch torchvision')
+    sys.exit(0)
+
+if not os.path.isdir('$repo_dest'):
+    print('  ❌ Repo not found: $repo_dest')
+    sys.exit(0)
+print('  ✓ Repo cloned: $repo_dest')
+
+# Step 2: Only try loading if weights exist
+if not ckpt_path:
     print()
-    print('  CoTracker3 will fall back to mock mode at runtime (pipeline still works).')
+    print('  ⚠ Skipping model load (no weights file)')
+    print()
+    print('  权重未下载。hubconf.py 会尝试从 huggingface.co 下载（外网不可达），')
+    print('  所以这里不执行加载测试。下载权重后再运行此脚本验证。')
+    print()
+    print('  解决方案 — 在有外网的机器下载后 scp 到本节点:')
+    print('    # 在有网机器:')
+    print('    wget https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth \\\\')
+    print('         -O $weights_dir/scaled_offline.pth')
+    print('    wget https://huggingface.co/facebook/cotracker3/resolve/main/scaled_online.pth \\\\')
+    print('         -O $weights_dir/scaled_online.pth')
+    print()
+    print('    # scp 到集群:')
+    print('    scp $weights_dir/*.pth your_cluster:$weights_dir/')
+    print()
+    print('  CoTracker3 will use mock mode at runtime (pipeline still works).')
+    sys.exit(0)
+
+# Step 3: Load with local weights (prevents hubconf.py from downloading)
+try:
+    print('  Loading model with local weights...')
+    print('  (checkpoint_path passed to hubconf → no auto-download)')
+    model = torch.hub.load('$repo_dest', 'cotracker3_offline', source='local', checkpoint_path=ckpt_path)
+    print('  ✓ CoTracker3 loaded successfully!')
+    print(f'    Weights: {ckpt_path}')
+except Exception as e:
+    print(f'  ❌ Load failed: {e}')
+    print()
+    print('  权重文件存在但加载失败，检查:')
+    print('    - 文件是否完整: ls -lh $offline_weights')
+    print('      完整文件大小应 > 300MB')
+    print('    - requirements.txt 依赖是否装全:')
+    print('      pip install -r $repo_dest/requirements.txt')
+    print()
+    print('  CoTracker3 will use mock mode at runtime (pipeline still works).')
 " 2>&1 || true
 
     echo ""
