@@ -202,9 +202,12 @@ class GroundingDINO:
 
     def _detect_official(self, img: np.ndarray, caption: str) -> list[dict]:
         """Detect using official IDEA-Research GroundingDINO API."""
-        from groundingdino.util.inference import load_image, predict
+        import torchvision.transforms.functional as F
+        from groundingdino.util.inference import predict
 
-        _, image_tensor = load_image(img)
+        # Convert numpy array to tensor: (H, W, C) RGB -> (C, H, W) normalized
+        image_tensor = F.to_tensor(img).to(self.device)
+
         boxes, logits, phrases = predict(
             model=self.model,
             image=image_tensor,
