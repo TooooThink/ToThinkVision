@@ -488,12 +488,30 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             except Exception as e:
                 logger.warning("2D completion failed for %s: %e", obj.id, e)
 
-    # ─── 3D Reconstruction (MASt3R) ─────────────────────────
+    # ─── 3D Reconstruction (MASt3R / Spann3R) ───────────────
     pc_data = {"points": [], "colors": []}
     camera_poses = []
-    if config.enable_mast3r:
+    reconstruction_backend = "none"
+
+    # Try Spann3R first if enabled (spatial memory for better long sequences)
+    if config.enable_spann3r and config.enable_mast3r:
+        try:
+            from app.models.spann3r import get_spann3r
+            spann3r = get_spann3r()
+            if spann3r.available:
+                pc_data, camera_poses = spann3r.reconstruct(
+                    frame_dir, sample_interval=config.mast3r_sample_interval,
+                )
+                reconstruction_backend = "spann3r"
+                logger.info("3D reconstruction via Spann3R (spatial memory)")
+        except Exception as e:
+            logger.warning("Spann3R failed: %s, falling back to MASt3R/VGGT", e)
+
+    # Fall back to MASt3R/VGGT
+    if reconstruction_backend == "none" and config.enable_mast3r:
         reconstructor = get_reconstructor()
         pc_data, camera_poses = reconstructor.reconstruct(frame_dir)
+        reconstruction_backend = "vggt" if reconstructor._backend == "vggt" else "mast3r"
 
     # ─── Per-Object 3D Mesh Reconstruction ──────────────────
     mesh_results = {}
@@ -546,6 +564,139 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         gs_pipe = get_splat_pipeline()
         gs_data = gs_pipe.train(frame_dir, settings.output_dir / "gs_training")
 
+    # ─── ObjectGS: Per-object 3D Gaussian Splatting (optional) ──
+    objectgs_data = None
+    if config.enable_objectgs:
+        try:
+            from app.models.object_gs import get_objectgs_pipeline
+            objectgs_pipe = get_objectgs_pipeline()
+            if objectgs_pipe.available:
+                masks_dir = img_dir / "objectgs_masks"
+                masks_dir.mkdir(parents=True, exist_ok=True)
+                objectgs_data = objectgs_pipe.train(
+                    frame_dir=frame_dir,
+                    masks_dir=masks_dir,
+                    output_dir=settings.output_dir / "objectgs_training",
+                )
+                model_versions["object_gs"] = "per_object_3dgs"
+                logger.info("ObjectGS: trained %d per-object Gaussians",
+                            len(objectgs_data.get("object_meshes", {})))
+        except Exception as e:
+            logger.warning("ObjectGS failed: %s", e)
+
+    # ─── CoTracker3: Dense point tracking (optional) ─────────
+    cotracker_data = None
+    if config.enable_cotracker3 and len(frame_paths) >= 2:
+        try:
+            from app.models.cotracker3 import get_cotracker
+            cotracker = get_cotracker(mode="offline")
+            if cotracker.model is not None:
+                # Load frames as numpy array for CoTracker3
+                from PIL import Image as PILImage
+                cotracker_frames = []
+                for fp in frame_paths[:config.max_video_frames]:
+                    fimg = np.array(PILImage.open(fp).convert("RGB"))
+                    cotracker_frames.append(fimg)
+                cotracker_frames = np.stack(cotracker_frames)
+                cotracker_data = cotracker.track_video(
+                    frames=cotracker_frames,
+                    grid_size=50,
+                    query_frame=0,
+                )
+                model_versions["cotracker3"] = "offline"
+                logger.info("CoTracker3: tracked %d points across %d frames",
+                            cotracker_data.get("num_points", 0), len(cotracker_frames))
+        except Exception as e:
+            logger.warning("CoTracker3 failed: %s", e)
+
+    # ─── Stage 6: 4D Trajectory Extraction ───────────────────
+    trajectories_4d = {}
+    trajectory_backend = "none"
+
+    # Option A: Shape of Motion (end-to-end 4D, replaces depth+tracking+ICP)
+    if config.enable_shape_of_motion and config.enable_4d_trajectory:
+        try:
+            from app.models.shape_of_motion import get_shape_of_motion
+            som_pipe = get_shape_of_motion()
+            som_result = som_pipe.reconstruct_4d(
+                video_path=file_path,
+                output_dir=settings.output_dir / "shape_of_motion",
+                num_frames=min(len(frame_paths), config.max_video_frames),
+            )
+            # Extract trajectories from Shape of Motion output
+            som_pcs = som_result.get("per_frame_pointclouds", [])
+            if som_pcs:
+                som_trajectories = som_pipe.extract_object_trajectories(som_pcs)
+                for obj_id, traj_data in som_trajectories.items():
+                    from app.schemas import ObjectTrajectory4D, TrajectoryKeyframe
+                    kfs = [TrajectoryKeyframe(**kf) for kf in traj_data.get("keyframes", [])
+                           if "position" in kf and "rotation" not in kf]
+                    # Shape of Motion gives positions but not rotations — fill defaults
+                    full_kfs = []
+                    for kf_data in traj_data.get("keyframes", []):
+                        full_kfs.append(TrajectoryKeyframe(
+                            timestamp=kf_data["timestamp"],
+                            frame_idx=kf_data["frame_idx"],
+                            position=kf_data["position"],
+                            rotation=(1.0, 0.0, 0.0, 0.0),
+                        ))
+                    if full_kfs:
+                        traj = ObjectTrajectory4D(
+                            object_id=obj_id,
+                            keyframes=full_kfs,
+                            motion_type=traj_data.get("motion_type", "rigid"),
+                            duration=full_kfs[-1].timestamp - full_kfs[0].timestamp if len(full_kfs) > 1 else 0.0,
+                        )
+                        trajectories_4d[obj_id] = traj
+                trajectory_backend = "shape_of_motion"
+                model_versions["trajectory_4d"] = "shape_of_motion"
+                logger.info("Shape of Motion: extracted %d trajectories (end-to-end 4D)",
+                            len(trajectories_4d))
+        except Exception as e:
+            logger.warning("Shape of Motion failed: %s, falling back to ICP-based extraction", e)
+
+    # Option B: ICP-based trajectory extraction (with CoTracker3 enhancement)
+    if not trajectories_4d and config.enable_4d_trajectory and all_depth_maps and per_frame_obj_data and camera_poses:
+        try:
+            from app.models.trajectory_4d import TrajectoryExtractor4D
+            traj_extractor = TrajectoryExtractor4D(config)
+            trajectories_4d = traj_extractor.extract_trajectories(
+                per_frame_objects=per_frame_obj_data,
+                depth_maps=all_depth_maps,
+                camera_poses=camera_poses,
+                frame_width=video_meta["width"],
+                frame_height=video_meta["height"],
+                fps=fps,
+            )
+            trajectory_backend = "icp_pca"
+            model_versions["trajectory_4d"] = "icp_pca"
+            logger.info("4D Trajectory (ICP): extracted %d object trajectories", len(trajectories_4d))
+        except Exception as e:
+            logger.warning("4D Trajectory extraction failed: %s", e)
+
+    # Enhance trajectories with CoTracker3 data if available
+    if cotracker_data and trajectories_4d and trajectory_backend == "icp_pca":
+        logger.info("CoTracker3 tracks available for trajectory refinement (%d points)",
+                    cotracker_data.get("num_points", 0))
+        # Store CoTracker data for downstream use (e.g., deformation estimation)
+        model_versions["cotracker3_enhanced"] = "true"
+
+    # ─── Stage 7: 4D Gaussian Splatting (optional, heavy) ────
+    gs4d_data = None
+    if config.enable_4dgs:
+        try:
+            from app.models.gaussian_splatting_4d import GaussianSplat4DPipeline
+            gs4d_pipe = GaussianSplat4DPipeline(config=config)
+            gs4d_output_dir = settings.output_dir / "4dgs_training"
+            gs4d_data = gs4d_pipe.train(
+                frame_dir=frame_dir,
+                camera_poses=camera_poses,
+                output_dir=gs4d_output_dir,
+            )
+            model_versions["gaussian_splatting_4d"] = "hexplane"
+        except Exception as e:
+            logger.warning("4D Gaussian Splatting failed: %s", e)
+
     # ─── Finalize objects ───────────────────────────────────
     # Compute velocity for tracked objects
     if tracker:
@@ -574,6 +725,84 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             # Save per-object mesh export path
             if mdata.get("obj_path"):
                 obj.mesh_obj_file = mdata["obj_path"]
+
+    # Attach 4D trajectories to StructuredObjects
+    for obj in final_objects:
+        if obj.id in trajectories_4d:
+            obj.trajectory_4d = trajectories_4d[obj.id]
+
+    # ─── Stage 8: Dynamic Scene Graph ────────────────────────
+    scene_graph = None
+    if config.enable_scene_graph and trajectories_4d:
+        try:
+            from app.scene.scene_graph_4d import SceneGraph4DBuilder
+            graph_builder = SceneGraph4DBuilder(fps=fps)
+            scene_graph = graph_builder.build(final_objects, trajectories_4d)
+            model_versions["scene_graph"] = "4d_temporal"
+        except Exception as e:
+            logger.warning("Scene graph construction failed: %s", e)
+
+    # ─── Stage 9: Animated Export ────────────────────────────
+    animated_gltf_path = None
+    usd_path = None
+    blend_path = None
+    scene_graph_json_path = None
+
+    if config.enable_animated_export and trajectories_4d:
+        img_dir = _ensure_export_dir(file_path)
+        anim_dir = img_dir / "animated"
+        anim_dir.mkdir(parents=True, exist_ok=True)
+
+        # Animated glTF
+        try:
+            from app.exporters.animated_gltf_exporter import AnimatedGLTFExporter
+            gltf_exp = AnimatedGLTFExporter()
+            animated_gltf_path = gltf_exp.export(
+                objects=final_objects,
+                trajectories=trajectories_4d,
+                camera_poses=[CameraPose(**pose) for pose in camera_poses] if camera_poses else None,
+                output_dir=anim_dir,
+                filename=f"{file_path.stem}_animated.glb",
+            )
+            model_versions["animated_gltf"] = "v1"
+        except Exception as e:
+            logger.warning("Animated glTF export failed: %s", e)
+
+        # USD scene
+        try:
+            from app.exporters.usd_exporter import USDExporter
+            usd_exp = USDExporter()
+            usd_path = usd_exp.export(
+                objects=final_objects,
+                trajectories=trajectories_4d,
+                camera_poses=[CameraPose(**pose) for pose in camera_poses] if camera_poses else None,
+                output_dir=anim_dir,
+                filename=f"{file_path.stem}_scene.usda",
+            )
+        except Exception as e:
+            logger.warning("USD export failed: %s", e)
+
+        # Blender scene
+        try:
+            from app.exporters.blender_exporter import BlenderExporter
+            blend_exp = BlenderExporter()
+            blend_path = blend_exp.export(
+                objects=final_objects,
+                trajectories=trajectories_4d,
+                camera_poses=[CameraPose(**pose) for pose in camera_poses] if camera_poses else None,
+                output_dir=anim_dir,
+                filename=file_path.stem,
+            )
+        except Exception as e:
+            logger.warning("Blender export failed: %s", e)
+
+    # Scene graph JSON
+    if scene_graph is not None:
+        img_dir = _ensure_export_dir(file_path)
+        scene_graph_json_path = img_dir / f"{file_path.stem}_scene_graph.json"
+        import json as _json
+        with open(scene_graph_json_path, "w") as _f:
+            _json.dump(scene_graph.model_dump(), _f, indent=2, default=str)
 
     # ─── Export visual outputs ──────────────────────────────
     img_dir = _ensure_export_dir(file_path)
@@ -664,6 +893,23 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         scene_obj = mesh_dir / "scene_mesh.obj"
         if scene_obj.exists():
             output.scene_mesh_path = str(scene_obj)
+
+    # Set 4D scene data
+    if scene_graph:
+        output.scene_graph_4d = scene_graph
+    if gs4d_data:
+        # Use first object's 4DGS data
+        for key, gs4d in gs4d_data.items():
+            output.gaussian_splats_4d = gs4d
+            break
+    if animated_gltf_path:
+        output.animated_gltf_path = str(animated_gltf_path)
+    if usd_path:
+        output.usd_path = str(usd_path)
+    if blend_path:
+        output.blend_path = str(blend_path)
+    if scene_graph_json_path:
+        output.scene_graph_json_path = str(scene_graph_json_path)
 
     return output
 

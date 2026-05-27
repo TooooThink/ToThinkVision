@@ -1,6 +1,8 @@
-# ToThinkVision v2.0 — 四合一通用视觉结构化引擎
+# ToThinkVision v2.1 — 视频 → 可编辑 4D 场景分解引擎
 
-输入任意图片/视频，自动调用 **7 个顶级 AI 模型** 并行分析，输出 2D + 3D 全结构化数据，支持 **20+ 种导出格式**（含游戏引擎 3D 网格+纹理 / PSD 分层 / AE 动画 / .splat 高斯场）。
+输入任意图片/视频（含 AI 生成视频），自动调用 **11 个顶级 AI 模型** 并行分析，输出 2D + 3D + **4D 时变场景** 全结构化数据，支持 **25+ 种导出格式**（含游戏引擎 3D 网格+纹理 / PSD 分层 / AE 动画 / .splat 高斯场 / **动画 glTF·USD·Blender 场景**）。
+
+v2.1 新增 **4D 场景分解能力**：输入一段视频，输出每个物体的 3D 几何 + **6DoF 运动轨迹** + 动态场景图，可直接导入 Unity/Unreal/Blender/AE 进行编辑。
 
 开源研究 & 工业项目，默认全部开启最强配置，用户可自由选择关闭某些模型。
 
@@ -26,10 +28,14 @@ MOCK_MODE=true uvicorn app.main:app --host 0.0.0.0 --port 8000
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 交互式安装脚本（可选择安装单个或多个模型）
+# 2. 安装 v2 基础模型（SAM 3 / Depth Pro / MASt3R 等）
 chmod +x install_models.sh && ./install_models.sh
 
-# 3. 启动服务
+# 3. [可选] 安装 v2.1 进阶 4D 模型（CoTracker3 / ObjectGS / Spann3R / Shape of Motion）
+chmod +x install_models_v3.sh && ./install_models_v3.sh
+#   4 个模型都有 mock 回退，不装也能跑
+
+# 4. 启动服务
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -37,37 +43,46 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 二、流水线：从视频到可编辑 3D 场景
+## 二、流水线：从视频到可编辑 4D 场景
 
 ```
-输入：图片 / 视频 (.mp4 / .png)
+输入：图片 / 视频 (.mp4 / .png) — 含 AI 生成的世界模型输出
   │
   ▼
 ┌──────────────────────────────────────────────────────────┐
 │ 阶段1：感知（Perception）                                 │
-│   "画面里有什么？在哪里？"                                  │
-│   目标检测 → 实例分割 → 多目标跟踪 → OCR文字识别            │
-│   输出：每帧中每个物体的 2D bbox + mask + 跨帧track_id     │
+│   SAM 3 + OmniParser + Grounding DINO + StrongSORT + OCR │
+│   输出：每帧中每个物体的 2D bbox + mask + 跨帧track_id    │
 ├──────────────────────────────────────────────────────────┤
-│ 阶段2：深度（Depth）                                      │
-│   "每个像素离我多远？"                                      │
-│   单目深度估计（每帧独立）                                   │
-│   输出：深度图 (H×W)，单位米                                │
+│ 阶段2：深度 + 2D 补全                                     │
+│   Depth Pro 度量深度；LaMa 补全残缺物体                      │
+│   输出：深度图 (H×W, 米) + 补全 mask                      │
 ├──────────────────────────────────────────────────────────┤
-│ 阶段3：3D重建（3D Reconstruction）                        │
-│   "真实世界长什么样？"                                      │
-│   多视角融合 → 场景点云 → 逐对象网格 → UV展开 → 纹理烘焙     │
-│   输出：3D点云 + 相机位姿 + 带贴图的3D网格(.obj/.gltf)      │
+│ 阶段3：3D重建（Spann3R / MASt3R / VGGT）                  │
+│   多视角融合 → 场景点云 → 逐对象网格 → UV展开 → 纹理烘焙   │
+│   输出：3D点云 + 相机位姿 + 带贴图的3D网格 (.obj/.gltf)   │
 ├──────────────────────────────────────────────────────────┤
 │ 阶段4：场景理解（Scene Understanding）                     │
-│   "这是什么场景？地面在哪？重力方向？"                        │
-│   地面平面检测(RANSAC) → 重力对齐 → 物体分类 → 物理属性      │
-│   输出：场景布局分析 {floor, walls, furniture, ...}        │
+│   地面平面检测 (RANSAC) → 重力对齐 → 物体分类             │
 ├──────────────────────────────────────────────────────────┤
-│ 阶段5：导出（Export）                                     │
-│   "目标引擎能读懂什么？"                                    │
-│   glTF(OV+纹理+PBR) / OBJ+MTL / Unity JSON / AE脚本 / PSD  │
-│   输出：各目标平台可用的文件                                 │
+│ 阶段5：3D 高斯 / ObjectGS（可选）                         │
+│   场景级 3DGS 或 逐物体 3DGS                                │
+├──────────────────────────────────────────────────────────┤
+│ 阶段6：4D 轨迹提取 ⭐                                     │
+│   方案A: Shape of Motion（端到端 4D 重建）                   │
+│   方案B: ICP + PCA + B-spline + CoTracker3 增强            │
+│   输出：逐物体 6DoF（位置+旋转+缩放+速度）                │
+├──────────────────────────────────────────────────────────┤
+│ 阶段7：4D 高斯泼溅（HexPlane，可选）⭐                     │
+│   时变高斯场景表示                                           │
+├──────────────────────────────────────────────────────────┤
+│ 阶段8：动态场景图 ⭐                                       │
+│   时变空间关系（above/near/contact）+ 交互事件               │
+│   （碰撞、拾起、放下、接触开始/结束）                        │
+├──────────────────────────────────────────────────────────┤
+│ 阶段9：动画导出 ⭐                                         │
+│   动画 glTF (.glb) / USDA / Blender 导入脚本                │
+│   + 4D 场景图 JSON + AE 关键帧                              │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -82,10 +97,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | **Grounding DINO** | IDEA-Research | 4-8GB | 开放词汇通用目标检测 |
 | **StrongSORT** | CVPR 2023 | CPU | ReID + Kalman + GMC 多目标追踪 |
 | **Depth Pro** | Apple (ICLR 2025) | 4-8GB | 真实米级深度估计，<1 秒推理 |
-| **MASt3R** | NAVER (2024) | 24-48GB | 视频 → 3D 点云 + 相机位姿 (SfM) |
+| **MASt3R / VGGT** | NAVER / Meta | 24-48GB | 视频 → 3D 点云 + 相机位姿 (SfM) |
+| **Spann3R** ⭐ | 3DV 2025 | 24-48GB | 带空间记忆的 3D 重建（长序列抗漂移） |
+| **ObjectGS** ⭐ | ICCV 2025 | 24GB | 逐物体 3D 高斯泼溅 |
+| **CoTracker3** ⭐ | Meta AI | 8-12GB | 稠密点追踪 (265×265)，提升轨迹精度 |
+| **Shape of Motion** ⭐ | ICCV 2025 | 24GB | 端到端单目视频 4D 重建 |
 | **3D Gaussian Splatting** | Nerfstudio | 24GB | 视频 → 照片级 3D 高斯场景 |
 
-所有模型均可通过环境变量单独关闭，也可全部启用获得最佳效果。
+⭐ v2.1 新增进阶 3D/4D 模型。所有模型可通过环境变量或 API 表单参数单独关闭，未安装权重/仓库时自动降级到 mock 模式。
 
 ---
 
@@ -110,7 +129,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 五、20+ 种导出格式
+## 五、25+ 种导出格式
 
 ### 3D 网格与场景
 | 格式 | 扩展名 | 说明 |
@@ -147,10 +166,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `robot_action` | `.json` | 机器人接近/抓取动作序列 |
 | `pose_csv` | `.csv` | 逐帧 3D 位姿 CSV |
 
+### 4D 场景（v2.1 新增）⭐
+| 格式 | 扩展名 | 说明 |
+|------|--------|------|
+| `animated_gltf` | `.glb` | 动画 glTF 二进制 — 逐物体 3D 网格 + 关键帧动画（位移+旋转+缩放），Unity/Blender 直接导入 |
+| `usd_scene` | `.usda` | USD 文本格式，含时间采样的变换、材质、动画摄像机，可用于 Unreal/Omniverse |
+| `blender_scene` | `.py` + `.obj` + `.json` | Blender Python 导入脚本 + 逐物体 OBJ 网格 + 轨迹 JSON |
+| `scene_graph_json` | `.json` | 动态 4D 场景图：节点（物体）+ 边（时变关系）+ 交互事件 |
+
 ### 通用
 | 格式 | 扩展名 | 说明 |
 |------|--------|------|
-| `full_json` | `.json` | 完整结构化输出，含所有 2D + 3D + 网格 + 相机 + 高斯数据 |
+| `full_json` | `.json` | 完整结构化输出，含所有 2D + 3D + 4D + 网格 + 相机 + 高斯数据 |
 
 ---
 
@@ -189,9 +216,19 @@ ToThinkVision/
 │   │   ├── grounding_dino.py        → Grounding DINO: 开放词汇检测
 │   │   ├── strongsort_wrapper.py    → StrongSORT: 多目标追踪
 │   │   ├── depth_pro.py             → Depth Pro: 度量深度估计
-│   │   ├── mast3r.py                → MASt3R: 3D 点云重建 + 相机位姿 (SfM)
+│   │   ├── mast3r.py                → MASt3R/VGGT: 3D 点云 + 相机位姿
 │   │   ├── gaussian_splatting.py    → 3DGS: 训练 + .splat/.ply 导出
-│   │   └── mesh_reconstruction.py   → ★ 逐对象3D网格: 深度反投影→Poisson→UV→纹理
+│   │   ├── mesh_reconstruction.py   → ★ 逐对象3D网格: 深度反投影→Poisson→UV→纹理
+│   │   ├── cotracker3.py            → ★ CoTracker3: 稠密点追踪 (265×265)
+│   │   ├── object_gs.py             → ★ ObjectGS: 逐物体 3D 高斯泼溅
+│   │   ├── spann3r.py               → ★ Spann3R: 带空间记忆的 3D 重建
+│   │   ├── shape_of_motion.py       → ★ Shape of Motion: 端到端 4D 重建
+│   │   ├── trajectory_4d.py         → ★ 6DoF 轨迹: ICP + PCA + B-spline
+│   │   └── gaussian_splatting_4d.py → ★ 4DGS (HexPlane 时间分解)
+│   │
+│   ├── scene/                       # 4D 场景理解
+│   │   ├── scene_graph_4d.py        → ★ 动态场景图构建器
+│   │   └── world_model_adapter.py   → ★ AI 生成视频检测 + 阈值调节
 │   │
 │   ├── exporters/                    # 导出层
 │   │   ├── base.py                  → Exporter 基类
@@ -205,6 +242,9 @@ ToThinkVision/
 │   │   ├── splat_exporter.py        → Splat: .splat 二进制 + .ply 高斯参数
 │   │   ├── ui_exporter.py           → UI: Figma/HTML/UI JSON
 │   │   ├── image_exporter.py        → 裁剪图 / mask / 深度可视化
+│   │   ├── animated_gltf_exporter.py → ★ 动画 .glb (逐物体关键帧动画)
+│   │   ├── usd_exporter.py          → ★ USDA (时间采样变换)
+│   │   ├── blender_exporter.py      → ★ Blender Python 脚本 + OBJ + 轨迹 JSON
 │   │   └── manifest.py              → 导出清单（README.txt）
 │   │
 │   └── utils/
@@ -231,7 +271,9 @@ ToThinkVision/
 ├── uploads/                          # 上传暂存（自动创建）
 ├── outputs/                          # 导出输出
 ├── requirements.txt                  # 依赖清单
-├── install_models.sh                 # 交互式模型下载脚本
+├── install_models.sh                 # v2 基础模型交互式下载脚本
+├── install_models_v2.sh              # v2 进阶模型下载脚本
+├── install_models_v3.sh              # v2.1 4D 模型交互式下载脚本（CoTracker3/ObjectGS/Spann3R/Shape of Motion）
 ├── README.md                         # 英文文档
 └── README_CN.md                      # ← 你正在看的中文文档
 ```
@@ -396,8 +438,20 @@ output_path = exporter.export(result)
 | `TTV_ENABLE_GROUNDING_DINO` | `true` | 是否启用 Grounding DINO |
 | `TTV_ENABLE_STRONGSORT` | `true` | 是否启用 StrongSORT |
 | `TTV_ENABLE_DEPTH_PRO` | `true` | 是否启用 Depth Pro |
-| `TTV_ENABLE_MAST3R` | `true` | 是否启用 MASt3R |
+| `TTV_ENABLE_MAST3R` | `true` | 是否启用 MASt3R / VGGT |
 | `TTV_ENABLE_GAUSSIAN_SPLATTING` | `false` | 是否启用 3DGS 训练 |
+| **v2.1 进阶模型**（需单独执行 `install_models_v3.sh`） | | |
+| `TTV_ENABLE_COTRACKER3` | `true` | 是否启用 CoTracker3 稠密点追踪 |
+| `TTV_ENABLE_OBJECTGS` | `false` | 是否启用 ObjectGS（需 clone 仓库） |
+| `TTV_ENABLE_SPANN3R` | `false` | 是否启用 Spann3R（需 clone 仓库） |
+| `TTV_ENABLE_SHAPE_OF_MOTION` | `false` | 是否启用 Shape of Motion（需 clone 仓库） |
+| `TTV_ENABLE_4D_TRAJECTORY` | `true` | 是否启用 4D 6DoF 轨迹提取 |
+| `TTV_ENABLE_4DGS` | `false` | 是否启用 4D 高斯泼溅（重量级，多卡） |
+| `TTV_ENABLE_SCENE_GRAPH` | `true` | 是否启用动态场景图构建 |
+| `TTV_ENABLE_ANIMATED_EXPORT` | `true` | 是否启用动画 glTF/USD/Blender 导出 |
+| `OBJECT_GS_PATH` | — | ObjectGS 仓库 clone 路径 |
+| `SPANN3R_PATH` | — | Spann3R 仓库 clone 路径 |
+| `SHAPE_OF_MOTION_PATH` | — | Shape of Motion 仓库 clone 路径 |
 | `TTV_OUTPUT_DIR` | `./outputs` | 导出文件输出目录 |
 
 ---
@@ -405,13 +459,14 @@ output_path = exporter.export(result)
 ## 十、运行测试
 
 ```bash
-# 运行全部测试（51 个用例）
+# 运行全部测试（112+ 个用例）
 MOCK_MODE=true pytest tests/ -v
 
 # 按模块运行
 MOCK_MODE=true pytest tests/test_schemas.py -v      # 数据结构 + 导出器 + 工具
 MOCK_MODE=true pytest tests/test_exporters.py -v    # 导出器格式验证
 MOCK_MODE=true pytest tests/test_pipeline.py -v     # Tracker + Geometry + Color
+MOCK_MODE=true pytest tests/test_4d_scene.py -v     # ★ 4D 轨迹 + 动画导出 + 场景图 (63)
 ```
 
 ---
@@ -506,3 +561,15 @@ A: Unity: 导入 [UnityGaussianSplatting](https://github.com/aras-p/UnityGaussia
 
 **Q: 3D 网格怎么导入 Unity/Blender？**
 A: glTF: 直接拖入 Blender，或用 [gltf-viewer](https://gltf-viewer.donmccurdy.com) 在浏览器中预览。OBJ: 通用格式，所有 3D 软件都能导入。Unity JSON: 需要配套 C# 导入脚本（详见 manifest 说明）。
+
+**Q: 怎么安装 v2.1 新增的 4 个模型（CoTracker3 / ObjectGS / Spann3R / Shape of Motion）？**
+A: 运行 `chmod +x install_models_v3.sh && ./install_models_v3.sh`，交互式选择安装。CoTracker3 只需下载权重（torch.hub 自动下载 ~300MB）；ObjectGS / Spann3R / Shape of Motion 需要 clone 仓库 + 安装子模块 + 各自依赖（共约 18GB）。4 个模型全部有 mock 回退，不装也能跑完整流程。
+
+**Q: 动画 glTF / USD / Blender 导出怎么用？**
+A: **动画 glTF (.glb)**：直接拖入 Blender 或 [gltf-viewer](https://gltf-viewer.donmccurdy.com) 在线预览；Unity 通过 `GameObject > Import Package` 导入，Unreal 通过 glTF 插件导入。**USDA**：用 NVIDIA Omniverse 打开，或通过 USD 插件导入 Unreal。**Blender 导出**：在 Blender 中运行生成的 `.py` 脚本（`File > Open > scene.py`），会自动导入所有逐物体 OBJ 网格并应用关键帧动画。
+
+**Q: 能处理 AI 生成的视频（Sora/Veo/Kling 等）吗？**
+A: 能。勾选 "World Model Video" 选项（或 API 设置 `is_world_model_video=True`）。流水线会自动：(1) 通过 `WorldModelAdapter` 检测 AI 视频特征；(2) 放宽 ICP/形变阈值（2×/1.5×）；(3) 增加 B-spline 平滑（+0.2~0.3）吸收时间抖动。推荐后端用 Shape of Motion，端到端、对非物理几何更鲁棒。
+
+**Q: 4D Trajectory 和 Shape of Motion 什么区别？**
+A: **4D Trajectory**（默认开，CPU）是流水线方案：深度图 + mask + ICP 对齐 → 逐物体 6DoF，可配合任何深度估计器。**Shape of Motion**（可选，24GB 显存）是端到端单目视频 4D 重建，联合优化几何与运动，不需要单独的深度/追踪步骤。显存够优先用 Shape of Motion，显存紧张退回到 4D Trajectory。

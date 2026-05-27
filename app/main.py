@@ -73,6 +73,11 @@ EXPORT_FORMAT_MAP: dict[str, type] = {
     ExportFormat.POSE_CSV: lambda: EmbodiedExporter(ExportFormat.POSE_CSV),
     # Universal
     ExportFormat.FULL_JSON: None,
+    # 4D Scene (generated in-pipeline, not via exporter classes)
+    ExportFormat.ANIMATED_GLTF: None,
+    ExportFormat.USD_SCENE: None,
+    ExportFormat.BLENDER_SCENE: None,
+    ExportFormat.SCENE_GRAPH_JSON: None,
 }
 
 
@@ -93,8 +98,15 @@ async def list_formats():
             "grounding_dino": {"label": "Grounding DINO 1.6", "description": "Open-Vocabulary Detection", "vram_gb": "4-8"},
             "strongsort": {"label": "StrongSORT", "description": "Multi-Object Tracking", "vram_gb": "CPU"},
             "depth_pro": {"label": "Depth Pro", "description": "Metric Depth Estimation", "vram_gb": "4-8"},
-            "mast3r": {"label": "MASt3R", "description": "3D Point Cloud + Camera Pose", "vram_gb": "24-48"},
+            "mast3r": {"label": "MASt3R / VGGT", "description": "3D Point Cloud + Camera Pose", "vram_gb": "24-48"},
             "gaussian_splatting": {"label": "3D Gaussian Splatting", "description": "Photorealistic 3D Scene", "vram_gb": "24"},
+            "cotracker3": {"label": "CoTracker3", "description": "Dense point tracking (265x265) for accurate trajectories", "vram_gb": "8-12"},
+            "objectgs": {"label": "ObjectGS", "description": "Per-object 3D Gaussian Splatting (ICCV 2025)", "vram_gb": "24"},
+            "spann3r": {"label": "Spann3R", "description": "3D reconstruction with spatial memory (3DV 2025)", "vram_gb": "24-48"},
+            "shape_of_motion": {"label": "Shape of Motion", "description": "End-to-end 4D reconstruction (ICCV 2025)", "vram_gb": "24"},
+            "trajectory_4d": {"label": "4D Trajectory", "description": "Per-object 6DoF motion extraction (ICP + PCA)", "vram_gb": "CPU"},
+            "gaussian_splatting_4d": {"label": "4D Gaussian Splatting", "description": "Temporal scene rendering (HexPlane)", "vram_gb": "24-48"},
+            "scene_graph_4d": {"label": "4D Scene Graph", "description": "Dynamic object relationships over time", "vram_gb": "CPU"},
         },
         "ui": [
             {"id": ExportFormat.FIGMA_JSON.value, "label": "Figma JSON"},
@@ -127,6 +139,12 @@ async def list_formats():
         "universal": [
             {"id": ExportFormat.FULL_JSON.value, "label": "Full Structured JSON"},
         ],
+        "scene_4d": [
+            {"id": ExportFormat.ANIMATED_GLTF.value, "label": "Animated glTF (Unity/Blender)"},
+            {"id": ExportFormat.USD_SCENE.value, "label": "USD Scene (Unreal/Omniverse)"},
+            {"id": ExportFormat.BLENDER_SCENE.value, "label": "Blender Scene"},
+            {"id": ExportFormat.SCENE_GRAPH_JSON.value, "label": "4D Scene Graph JSON"},
+        ],
     }
 
 
@@ -145,6 +163,17 @@ async def process_upload(
     enable_depth_pro: bool = Form(True),
     enable_mast3r: bool = Form(True),
     enable_gaussian_splatting: bool = Form(False),
+    # Advanced 3D/4D models
+    enable_cotracker3: bool = Form(True),
+    enable_objectgs: bool = Form(False),
+    enable_spann3r: bool = Form(False),
+    enable_shape_of_motion: bool = Form(False),
+    # 4D Scene options
+    enable_4d_trajectory: bool = Form(True),
+    enable_4dgs: bool = Form(False),
+    enable_scene_graph: bool = Form(True),
+    enable_animated_export: bool = Form(True),
+    is_world_model_video: bool = Form(False),
     # Video options
     max_video_frames: int = Form(300),
 ):
@@ -161,6 +190,15 @@ async def process_upload(
         enable_depth_pro=enable_depth_pro,
         enable_mast3r=enable_mast3r,
         enable_gaussian_splatting=enable_gaussian_splatting,
+        enable_cotracker3=enable_cotracker3,
+        enable_objectgs=enable_objectgs,
+        enable_spann3r=enable_spann3r,
+        enable_shape_of_motion=enable_shape_of_motion,
+        enable_4d_trajectory=enable_4d_trajectory,
+        enable_4dgs=enable_4dgs,
+        enable_scene_graph=enable_scene_graph,
+        enable_animated_export=enable_animated_export,
+        is_world_model_video=is_world_model_video,
         max_video_frames=max_video_frames,
     )
 

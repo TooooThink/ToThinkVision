@@ -62,6 +62,15 @@
         <label class="model-toggle"><input type="checkbox" checked data-model="enable_depth_pro"><div class="model-info"><div class="model-name">Depth Pro</div><div class="model-desc">度量深度 · 4-8GB</div></div></label>
         <label class="model-toggle"><input type="checkbox" checked data-model="enable_mast3r"><div class="model-info"><div class="model-name">MASt3R</div><div class="model-desc">3D 点云+相机位姿 · 24-48GB</div></div></label>
         <label class="model-toggle"><input type="checkbox" data-model="enable_gaussian_splatting"><div class="model-info"><div class="model-name">3D Gaussian Splatting</div><div class="model-desc">照片级 3D 场景 · 24GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_cotracker3"><div class="model-info"><div class="model-name">CoTracker3</div><div class="model-desc">稠密点追踪 (265×265) · 8-12GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" data-model="enable_objectgs"><div class="model-info"><div class="model-name">ObjectGS</div><div class="model-desc">逐物体 3D 高斯 (ICCV 2025) · 24GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" data-model="enable_spann3r"><div class="model-info"><div class="model-name">Spann3R</div><div class="model-desc">空间记忆 3D 重建 (3DV 2025) · 24-48GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" data-model="enable_shape_of_motion"><div class="model-info"><div class="model-name">Shape of Motion</div><div class="model-desc">端到端 4D 重建 (ICCV 2025) · 24GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_4d_trajectory"><div class="model-info"><div class="model-name">4D Trajectory</div><div class="model-desc">6DoF 运动轨迹提取 · CPU</div></div></label>
+        <label class="model-toggle"><input type="checkbox" data-model="enable_4dgs"><div class="model-info"><div class="model-name">4D Gaussian Splatting</div><div class="model-desc">时变场景渲染 · 24-48GB</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_scene_graph"><div class="model-info"><div class="model-name">4D Scene Graph</div><div class="model-desc">动态物体关系图 · CPU</div></div></label>
+        <label class="model-toggle"><input type="checkbox" checked data-model="enable_animated_export"><div class="model-info"><div class="model-name">Animated Export</div><div class="model-desc">glTF/USD/Blender 动画 · CPU</div></div></label>
+        <label class="model-toggle"><input type="checkbox" data-model="is_world_model_video"><div class="model-info"><div class="model-name">World Model Video</div><div class="model-desc">AI生成视频适配模式</div></div></label>
       </div>
     </div>
 
@@ -143,6 +152,12 @@ const ALL_FORMATS = {
   universal: [
     { id: 'full_json', label: 'Full Structured JSON' },
   ],
+  scene_4d: [
+    { id: 'animated_gltf', label: 'Animated glTF (Unity/Blender)' },
+    { id: 'usd_scene', label: 'USD Scene (Unreal/Omniverse)' },
+    { id: 'blender_scene', label: 'Blender Scene' },
+    { id: 'scene_graph_json', label: '4D Scene Graph JSON' },
+  ],
 };
 
 let selectedFile = null;
@@ -156,7 +171,7 @@ function renderAllFormats() {
     const sec = document.createElement('div');
     sec.className = 'format-section';
     const h4 = document.createElement('h4');
-    const labels = { ui: 'UI 解构', game_3d: '游戏 3D', video: '视频动效', psd: 'PSD 分层', embodied: '具身智能', universal: '通用' };
+    const labels = { ui: 'UI 解构', game_3d: '游戏 3D', video: '视频动效', psd: 'PSD 分层', embodied: '具身智能', universal: '通用', scene_4d: '4D 场景动画' };
     h4.textContent = labels[section] || section;
     sec.appendChild(h4);
     const grid = document.createElement('div');
