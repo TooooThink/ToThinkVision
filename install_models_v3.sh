@@ -231,10 +231,38 @@ install_cotracker3() {
 
     # Step 4: Verify installation
     #
-    # 关键：只在权重文件存在时才尝试加载
-    # - 权重存在 → 传 checkpoint_path，hubconf.py 直接用本地文件，不下载
-    # - 权重不存在 → 不加载，避免 hubconf.py 触发 huggingface.co 下载（外网）
+    # 关键：hubconf.py 会忽略 checkpoint_path 参数，始终从 huggingface.co 下载
+    # 解决方案：把权重复制到 torch.hub 缓存目录 (~/.cache/torch/hub/checkpoints/)
+    # 这样 hubconf.py 下载时发现文件已存在，会跳过下载
     #
+    local torch_cache="$HOME/.cache/torch/hub/checkpoints"
+    mkdir -p "$torch_cache"
+
+    echo ""
+    echo "  === Preparing torch.hub cache ==="
+
+    if [ -f "$offline_weights" ]; then
+        local cache_dest="$torch_cache/scaled_offline.pth"
+        if [ ! -f "$cache_dest" ]; then
+            echo "  Copying offline weights to torch.hub cache..."
+            cp "$offline_weights" "$cache_dest"
+            echo "  ✓ Cached: $cache_dest"
+        else
+            echo "  ✓ Already in torch.hub cache: $cache_dest"
+        fi
+    fi
+
+    if [ -f "$online_weights" ]; then
+        local cache_dest_online="$torch_cache/scaled_online.pth"
+        if [ ! -f "$cache_dest_online" ]; then
+            echo "  Copying online weights to torch.hub cache..."
+            cp "$online_weights" "$cache_dest_online"
+            echo "  ✓ Cached: $cache_dest_online"
+        else
+            echo "  ✓ Already in torch.hub cache: $cache_dest_online"
+        fi
+    fi
+
     export COTRACKER_REPO="$repo_dest"
     local ckpt_path=""
     if [ -f "$offline_weights" ]; then
@@ -290,19 +318,17 @@ if not ckpt_path:
     print('  CoTracker3 will use mock mode at runtime (pipeline still works).')
     sys.exit(0)
 
-# Step 3: Load with local weights (prevents hubconf.py from downloading)
+# Step 3: Load model (hubconf.py will find weights in torch.hub cache)
 try:
-    print('  Loading model with local weights...')
-    print('  (checkpoint_path passed to hubconf → no auto-download)')
-    model = torch.hub.load('$repo_dest', 'cotracker3_offline', source='local', checkpoint_path=ckpt_path)
+    print('  Loading model...')
+    print('  (weights pre-cached in ~/.cache/torch/hub/checkpoints/ → no download)')
+    model = torch.hub.load('$repo_dest', 'cotracker3_offline', source='local')
     print('  ✓ CoTracker3 loaded successfully!')
-    print(f'    Weights: {ckpt_path}')
+    print(f'    Weights: ~/.cache/torch/hub/checkpoints/scaled_offline.pth')
 except Exception as e:
     print(f'  ❌ Load failed: {e}')
     print()
-    print('  权重文件存在但加载失败，检查:')
-    print('    - 文件是否完整: ls -lh $offline_weights')
-    print('      完整文件大小应 > 300MB')
+    print('  权重已缓存但加载失败，检查:')
     print('    - requirements.txt 依赖是否装全:')
     print('      pip install -r $repo_dest/requirements.txt')
     print()

@@ -59,6 +59,7 @@ class CoTracker3Predictor:
 
         try:
             import os
+            import shutil
 
             # 优先级:
             # 1. 显式传入 checkpoint_path
@@ -83,24 +84,24 @@ class CoTracker3Predictor:
             else:
                 hub_source = "facebookresearch/co-tracker"
 
+            # CoTracker3's hubconf.py ignores checkpoint_path parameter and always
+            # downloads from huggingface.co. Workaround: pre-copy weights to torch.hub
+            # cache directory so hubconf.py finds them and skips the download.
             if ckpt_path and Path(ckpt_path).exists():
-                # Load model via torch.hub, passing checkpoint_path to the factory function
-                # This bypasses the auto-download inside hubconf.py (which hits HuggingFace)
-                model = torch.hub.load(
-                    hub_source,
-                    f"cotracker3_{self.mode}",
-                    checkpoint_path=ckpt_path,
-                    **hub_kwargs,
-                ).to(self.device)
-                self.model = model
-                logger.info("CoTracker3 loaded with local weights: %s", ckpt_path)
-            else:
-                # Load via torch.hub (auto-downloads weights from HuggingFace)
-                self.model = torch.hub.load(
-                    hub_source,
-                    f"cotracker3_{self.mode}",
-                    **hub_kwargs,
-                ).to(self.device)
+                torch_cache = Path.home() / ".cache" / "torch" / "hub" / "checkpoints"
+                torch_cache.mkdir(parents=True, exist_ok=True)
+                cache_dest = torch_cache / f"scaled_{self.mode}.pth"
+                if not cache_dest.exists():
+                    logger.info("CoTracker3: copying weights to torch.hub cache: %s", cache_dest)
+                    shutil.copy2(ckpt_path, cache_dest)
+                else:
+                    logger.info("CoTracker3: weights already in torch.hub cache")
+
+            self.model = torch.hub.load(
+                hub_source,
+                f"cotracker3_{self.mode}",
+                **hub_kwargs,
+            ).to(self.device)
 
             logger.info("CoTracker3 (%s mode) loaded successfully", self.mode)
         except Exception as e:
