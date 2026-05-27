@@ -82,14 +82,14 @@ class SAM3Predictor:
             ckpt_v31 = cache / "sam3.1" / "sam3.1_multiplex.pt"
             ckpt_v3 = cache / "sam3.pt"
             ckpt = str(ckpt_v31 if ckpt_v31.exists() else ckpt_v3)
+            has_local_ckpt = Path(ckpt).exists()
 
             self._model = build_sam3_image_model(
                 device=self.device,
-                checkpoint_path=ckpt if Path(ckpt).exists() else None,
-                load_from_HF=not Path(ckpt).exists(),
+                checkpoint_path=ckpt if has_local_ckpt else None,
+                load_from_HF=not has_local_ckpt,
                 enable_inst_interactivity=True,
                 enable_segmentation=True,
-                version="sam3.1" if ckpt_v31.exists() else "sam3",
             )
 
             # Get the interactive predictor attached to the model
@@ -105,10 +105,7 @@ class SAM3Predictor:
                 from sam3.model_builder import build_sam3_video_predictor
 
                 self.video_predictor = build_sam3_video_predictor(
-                    device=self.device,
-                    checkpoint_path=ckpt if Path(ckpt).exists() else None,
-                    load_from_HF=not Path(ckpt).exists(),
-                    version="sam3.1" if ckpt_v31.exists() else "sam3",
+                    checkpoint_path=ckpt if has_local_ckpt else None,
                 )
                 logger.info("SAM 3 video predictor loaded")
             except Exception as e:
