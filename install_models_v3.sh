@@ -425,13 +425,65 @@ install_spann3r() {
         (cd dust3r && pip install . 2>&1 | tail -2) || true
     fi
 
-    # Download weights (Spann3R checkpoint via HuggingFace)
-    local weights_url="${HF_ENDPOINT}/hengyiwang/Spann3R/resolve/main/spann3r_checkpoint.pth"
-    local weights_dest="$CACHE_DIR/Spann3R/spann3r_checkpoint.pth"
-    download_weights "$weights_url" "$weights_dest" || {
-        echo "  ⚠ Weight download failed; set SPANN3R_WEIGHTS manually or download from:"
-        echo "    ${HF_ENDPOINT}/hengyiwang/Spann3R/resolve/main/spann3r_checkpoint.pth"
-    }
+    # Download weights
+    #
+    # 真实地址: Google Drive (不在 HuggingFace!)
+    #   https://drive.google.com/drive/folders/1bqtcVf8lK4VC8LgG-SIGRBECcrFqM7Wy
+    #   文件名: spann3r.pth (放到 ./checkpoints/ 下)
+    #
+    # Google Drive 下载方案:
+    #   1. gdown (Python package, 推荐)
+    #   2. 浏览器下载后 scp
+    #
+    local weights_dir="$dest/checkpoints"
+    mkdir -p "$weights_dir"
+    local weights_dest="$weights_dir/spann3r.pth"
+
+    echo ""
+    echo "  === Downloading Spann3R weights ==="
+    echo "  Target: $weights_dest"
+    echo ""
+
+    if [ ! -f "$weights_dest" ]; then
+        # Method 1: gdown (Python package for Google Drive downloads)
+        if command -v gdown &>/dev/null || pip show gdown &>/dev/null 2>&1; then
+            echo "  Using gdown to download from Google Drive..."
+            # The folder ID is 1bqtcVf8lK4VC8LgG-SIGRBECcrFqM7Wy
+            # Need the actual file ID — try common ones
+            gdown --fuzzy "https://drive.google.com/uc?id=1bqtcVf8lK4VC8LgG-SIGRBECcrFqM7Wy" -O "$weights_dest" 2>&1 || true
+        fi
+
+        if [ ! -f "$weights_dest" ] || [ "$(stat -c%s "$weights_dest" 2>/dev/null || echo 0)" -lt 1000 ]; then
+            rm -f "$weights_dest"
+            # Try pip-installing gdown and retry
+            echo "  Installing gdown for Google Drive downloads..."
+            pip install $PIP_INDEX gdown 2>&1 | tail -2 || true
+            gdown --fuzzy "https://drive.google.com/drive/folders/1bqtcVf8lK4VC8LgG-SIGRBECcrFqM7Wy" -O "$weights_dir" --folder 2>&1 | tail -5 || true
+            # gdown --folder downloads all files, look for spann3r.pth
+            if [ -f "$weights_dir/spann3r.pth" ]; then
+                echo "  ✓ Downloaded via gdown"
+            fi
+        fi
+    else
+        echo "  ✓ Already exists: $weights_dest"
+    fi
+
+    if [ ! -f "$weights_dest" ]; then
+        echo ""
+        echo "  ⚠ Automatic download from Google Drive failed."
+        echo ""
+        echo "  Spann3R weights are hosted on Google Drive:"
+        echo "    https://drive.google.com/drive/folders/1bqtcVf8lK4VC8LgG-SIGRBECcrFqM7Wy"
+        echo ""
+        echo "  Manual steps:"
+        echo "    1. Open the link above in a browser (may need VPN for Google)"
+        echo "    2. Download spann3r.pth"
+        echo "    3. Place it at: $weights_dest"
+        echo ""
+        echo "  Or via gdown CLI (if you have Google access):"
+        echo "    pip install gdown"
+        echo "    gdown --folder 'https://drive.google.com/drive/folders/1bqtcVf8lK4VC8LgG-SIGRBECcrFqM7Wy' -O $weights_dir"
+    fi
 
     echo ""
     echo "  ✓ Spann3R installed at: $dest"
@@ -476,11 +528,54 @@ install_shape_of_motion() {
         (cd cuda_ext && pip install . 2>&1 | tail -2) || true
     fi
 
-    # Download pretrained weights via HuggingFace (if available)
-    local weights_url="${HF_ENDPOINT}/vye16/shape-of-motion/resolve/main/som_pretrained.pth"
-    local weights_dest="$CACHE_DIR/ShapeOfMotion/som_pretrained.pth"
-    download_weights "$weights_url" "$weights_dest" || \
-        echo "  ⚠ Weight download skipped; run the repo's official download script if needed"
+    # Download pretrained weights
+    #
+    # 真实地址: GitHub Releases v0.0.1
+    #   https://github.com/vye16/shape-of-motion/releases/download/v0.0.1/paper-windmill.zip
+    #   156MB zip, contains checkpoint + configs
+    #
+    # GitHub 下载走 gh-proxy（国内镜像）
+    #
+    local weights_dir="$CACHE_DIR/ShapeOfMotion"
+    mkdir -p "$weights_dir"
+    local zip_dest="$weights_dir/paper-windmill.zip"
+    local raw_url="https://github.com/vye16/shape-of-motion/releases/download/v0.0.1/paper-windmill.zip"
+    local proxy_url="https://gh-proxy.com/$raw_url"
+
+    echo ""
+    echo "  === Downloading Shape of Motion weights ==="
+    echo "  Target: $weights_dir"
+    echo ""
+
+    if [ ! -d "$weights_dir/paper-windmill" ] && [ ! -f "$zip_dest" ]; then
+        echo "  Trying direct GitHub download..."
+        if curl -fSL --retry 3 -o "$zip_dest" "$raw_url"; then
+            echo "  ✓ Downloaded paper-windmill.zip"
+        else
+            echo "  Direct download failed, trying gh-proxy.com mirror..."
+            if curl -fSL --retry 3 -o "$zip_dest" "$proxy_url"; then
+                echo "  ✓ Downloaded via gh-proxy.com"
+            else
+                rm -f "$zip_dest"
+                echo "  ❌ Download failed"
+            fi
+        fi
+    fi
+
+    if [ -f "$zip_dest" ]; then
+        echo "  Extracting paper-windmill.zip..."
+        unzip -qo "$zip_dest" -d "$weights_dir" && \
+            echo "  ✓ Extracted to: $weights_dir/paper-windmill" || \
+            echo "  ⚠ unzip failed, extract manually: $zip_dest"
+    fi
+
+    if [ ! -d "$weights_dir/paper-windmill" ]; then
+        echo ""
+        echo "  ⚠ Weights not available. Download manually:"
+        echo "    URL: $raw_url"
+        echo "    Save to: $zip_dest"
+        echo "    Then: unzip $zip_dest -d $weights_dir"
+    fi
 
     echo ""
     echo "  ✓ Shape of Motion installed at: $dest"
