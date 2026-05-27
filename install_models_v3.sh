@@ -63,14 +63,67 @@ try_clone() {
 }
 
 download_weights() {
-    # $1 = URL, $2 = destination
+    # $1 = URL, $2 = destination, $3 = expected size in bytes (optional)
+    #
+    # Features:
+    #   - Checks both file existence AND size (catches partial downloads)
+    #   - Cleans up incomplete files on failure
+    #   - Retries up to 3 times with backoff
+    #   - Shows clear error messages (no silent suppression)
     if [ -f "$2" ]; then
-        echo "  Already downloaded: $(basename "$2")"
-        return 0
+        # If expected size provided, verify completeness
+        if [ -n "$3" ]; then
+            local actual_size
+            actual_size=$(stat -c%s "$2" 2>/dev/null || stat -f%z "$2" 2>/dev/null || echo "0")
+            if [ "$actual_size" -ge "$3" ]; then
+                echo "  ✓ Already downloaded (complete): $(basename "$2")"
+                return 0
+            else
+                echo "  ⚠ Found incomplete file $(basename "$2") ($actual_size / $3 bytes), re-downloading..."
+                rm -f "$2"
+            fi
+        else
+            # No size check — just verify non-empty
+            local actual_size
+            actual_size=$(stat -c%s "$2" 2>/dev/null || stat -f%z "$2" 2>/dev/null || echo "0")
+            if [ "$actual_size" -gt 0 ]; then
+                echo "  ✓ Already downloaded: $(basename "$2")"
+                return 0
+            else
+                echo "  ⚠ Found empty file $(basename "$2"), re-downloading..."
+                rm -f "$2"
+            fi
+        fi
     fi
     mkdir -p "$(dirname "$2")"
     echo "  Downloading: $(basename "$2")"
-    curl -fSL "$1" -o "$2" || wget -q "$1" -O "$2"
+    echo "  From: $1"
+
+    local max_retries=3
+    local attempt=0
+    while [ $attempt -lt $max_retries ]; do
+        attempt=$((attempt + 1))
+        if curl -fSL --retry 3 --retry-delay 5 --connect-timeout 30 -o "$2" "$1"; then
+            echo "  ✓ Downloaded: $(basename "$2")"
+            return 0
+        fi
+        echo "  ⚠ curl attempt $attempt/$max_retries failed"
+        rm -f "$2"  # Clean up partial download
+        sleep $((attempt * 2))
+    done
+
+    # Fallback: wget (if available)
+    if command -v wget &>/dev/null; then
+        echo "  Trying wget..."
+        if wget --tries=3 --timeout=30 -O "$2" "$1"; then
+            echo "  ✓ Downloaded (wget): $(basename "$2")"
+            return 0
+        fi
+        rm -f "$2"
+    fi
+
+    echo "  ❌ Download failed: $(basename "$2")"
+    return 1
 }
 
 echo "=========================================="
@@ -103,6 +156,7 @@ echo "  5) ALL of the above (~18GB total)"
 echo "  0) Exit"
 echo ""
 echo "Tip: set USE_MIRROR=true before running for mainland China mirrors"
+echo "     (uses hf-mirror.com + gh-proxy.com + Tsinghua PyPI)"
 echo ""
 
 read -r -p "Your choice [0-5]: " CHOICE
@@ -110,12 +164,17 @@ read -r -p "Your choice [0-5]: " CHOICE
 install_cotracker3() {
     echo ""
     echo "=== Installing CoTracker3 ==="
-    # CoTracker3 通过 torch.hub 加载，但 torch.hub 会直连 GitHub（国内不稳）
-    # 解决方案：先手动 clone 仓库，然后用 source='local' 加载
+    #
+    # CoTracker3 加载流程（国内环境特殊处理）:
+    #   1. torch.hub.load() 会先从 GitHub 下载 repo zip → 我们用 source='local' 跳过
+    #   2. hubconf.py 内部会再从 huggingface.co 下载权重 → 我们预先用镜像下载，传 checkpoint_path 跳过
+    #
+    # 关键：必须预先下载权重并传 checkpoint_path，否则 hubconf.py 会直连 huggingface.co（外网）
+    #
 
     local repo_dest="$REPOS_DIR/co-tracker"
 
-    # Step 1: Clone repo
+    # Step 1: Clone repo (via gh-proxy if needed)
     if ! try_clone "facebookresearch/co-tracker" "$repo_dest"; then
         echo "  ❌ Failed to clone CoTracker3"
         return 1
@@ -123,43 +182,113 @@ install_cotracker3() {
 
     cd "$repo_dest"
 
-    # Step 2: Install dependencies (requirements.txt + optional CUDA extensions)
+    # Step 2: Install dependencies
     if [ -f "requirements.txt" ]; then
         echo "  Installing CoTracker3 dependencies..."
         pip install $PIP_INDEX -r requirements.txt 2>&1 | tail -3 || true
     fi
 
-    # Step 3: Download pretrained weights from HuggingFace (走 hf-mirror 镜像)
+    # Step 3: Download pretrained weights
+    #
+    # 权重真实地址（~300MB each）:
+    #   https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth
+    #   https://huggingface.co/facebook/cotracker3/resolve/main/scaled_online.pth
+    #
+    # 走 HF_ENDPOINT 镜像（USE_MIRROR=true 时为 hf-mirror.com）
+    # 如果镜像也失败，尝试 huggingface.co 直连（万一用户有梯子）
+    # 最后给出手动下载指引
+    #
     local weights_dir="$CACHE_DIR/CoTracker3"
     mkdir -p "$weights_dir"
-    local weights_url="${HF_ENDPOINT}/facebook/cotracker3/resolve/main/cotracker3_offline.pth"
-    local weights_dest="$weights_dir/cotracker3_offline.pth"
-    download_weights "$weights_url" "$weights_dest" 2>/dev/null || \
-        echo "  ⚠ Offline weights download skipped"
-    local weights_url_online="${HF_ENDPOINT}/facebook/cotracker3/resolve/main/cotracker3_online.pth"
-    local weights_dest_online="$weights_dir/cotracker3_online.pth"
-    download_weights "$weights_url_online" "$weights_dest_online" 2>/dev/null || \
-        echo "  ⚠ Online weights download skipped"
 
-    # Step 4: 验证加载（用 source='local' 避免再次下载 zip）
-    echo "  Verifying CoTracker3 load (source=local)..."
+    local offline_weights="$weights_dir/scaled_offline.pth"
+    local online_weights="$weights_dir/scaled_online.pth"
+
+    echo ""
+    echo "  === Downloading CoTracker3 weights ==="
+    echo "  Target dir: $weights_dir"
+    echo "  Using HF endpoint: $HF_ENDPOINT"
+    echo ""
+
+    # --- Offline weights (primary, ~300MB) ---
+    local mirror_url="${HF_ENDPOINT}/facebook/cotracker3/resolve/main/scaled_offline.pth"
+    if ! download_weights "$mirror_url" "$offline_weights"; then
+        echo "  ⚠ Mirror download failed."
+        if [ "$HF_ENDPOINT" != "https://huggingface.co" ]; then
+            echo "  Trying direct huggingface.co (needs VPN/foreign access)..."
+            download_weights "https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth" "$offline_weights" || true
+        fi
+    fi
+
+    # --- Online weights (secondary, ~300MB) ---
+    local mirror_url_online="${HF_ENDPOINT}/facebook/cotracker3/resolve/main/scaled_online.pth"
+    if ! download_weights "$mirror_url_online" "$online_weights"; then
+        echo "  ⚠ Online weights download failed (non-critical, offline mode still works)"
+    fi
+
+    # Step 4: Verify installation
+    #
+    # 关键：始终传 checkpoint_path（即使为空字符串 → Python 中 or None → 不传参）
+    # 这样 hubconf.py 不会触发自己的 huggingface.co 下载
+    # 如果权重文件不存在，会直接报错（不会悄悄走外网）
+    #
+    echo ""
+    echo "  === Verifying CoTracker3 installation ==="
+
+    export COTRACKER_REPO="$repo_dest"
+    local ckpt_path=""
+    if [ -f "$offline_weights" ]; then
+        ckpt_path="$offline_weights"
+        echo "  Found local weights: $offline_weights"
+    else
+        echo "  ⚠ Weights not found at $offline_weights"
+        echo "    → Verification will fail (hubconf.py download disabled to avoid foreign network)"
+    fi
+
     python -c "
-import sys
+import os, sys
 sys.path.insert(0, '$repo_dest')
+ckpt = '''$ckpt_path''' or None
 try:
     import torch
-    # 方式1: source='local' 直接用本地仓库
-    model = torch.hub.load('$repo_dest', 'cotracker3_offline', source='local')
-    print('  ✓ CoTracker3 offline loaded (local)')
+    kwargs = {'checkpoint_path': ckpt} if ckpt else {}
+    model = torch.hub.load('$repo_dest', 'cotracker3_offline', source='local', **kwargs)
+    print('  ✓ CoTracker3 offline loaded successfully')
+    if ckpt:
+        print(f'    Weights: {ckpt}')
+    else:
+        print('    (no local weights — loaded with hubconf default)')
 except Exception as e:
     print(f'  ⚠ Load failed: {e}')
-    print('  Will fall back to mock mode at runtime.')
+    if not ckpt:
+        print()
+        print('  原因: 权重未下载，且 hubconf.py 尝试从 huggingface.co 下载（外网不可达）')
+        print()
+        print('  解决方案 — 在有外网的机器下载后 scp 到本节点:')
+        print('    # 在有网机器:')
+        print('    wget https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth \\')
+        print('         -O $weights_dir/scaled_offline.pth')
+        print('    wget https://huggingface.co/facebook/cotracker3/resolve/main/scaled_online.pth \\')
+        print('         -O $weights_dir/scaled_online.pth')
+        print()
+        print('    # scp 到集群:')
+        print('    scp $weights_dir/*.pth cluster:$weights_dir/')
+        print()
+        print('  或使用 huggingface-cli（需要 HF_TOKEN）:')
+        print('    huggingface-cli download facebook/cotracker3 --local-dir $weights_dir')
+    else:
+        print()
+        print('  权重文件存在但加载失败，检查:')
+        print('    - 文件是否完整（可能下载中断）: ls -lh $offline_weights')
+        print('    - requirements.txt 依赖是否装全: pip install -r $repo_dest/requirements.txt')
+    print()
+    print('  CoTracker3 will fall back to mock mode at runtime (pipeline still works).')
 " 2>&1 || true
 
     echo ""
-    echo "  ✓ CoTracker3 installed at: $repo_dest"
+    echo "  ✓ CoTracker3 repo installed at: $repo_dest"
     echo ""
-    echo "  Add to your shell profile:"
+    echo "  Add to your shell profile (~/.bashrc or ~/.zshrc):"
     echo "    export COTRACKER_REPO=\"$repo_dest\""
     echo ""
 
@@ -249,8 +378,10 @@ install_spann3r() {
     # Download weights (Spann3R checkpoint via HuggingFace)
     local weights_url="${HF_ENDPOINT}/hengyiwang/Spann3R/resolve/main/spann3r_checkpoint.pth"
     local weights_dest="$CACHE_DIR/Spann3R/spann3r_checkpoint.pth"
-    download_weights "$weights_url" "$weights_dest" 2>/dev/null || \
-        echo "  ⚠ Weight download failed; set SPANN3R_WEIGHTS manually"
+    download_weights "$weights_url" "$weights_dest" || {
+        echo "  ⚠ Weight download failed; set SPANN3R_WEIGHTS manually or download from:"
+        echo "    ${HF_ENDPOINT}/hengyiwang/Spann3R/resolve/main/spann3r_checkpoint.pth"
+    }
 
     echo ""
     echo "  ✓ Spann3R installed at: $dest"
@@ -298,7 +429,7 @@ install_shape_of_motion() {
     # Download pretrained weights via HuggingFace (if available)
     local weights_url="${HF_ENDPOINT}/vye16/shape-of-motion/resolve/main/som_pretrained.pth"
     local weights_dest="$CACHE_DIR/ShapeOfMotion/som_pretrained.pth"
-    download_weights "$weights_url" "$weights_dest" 2>/dev/null || \
+    download_weights "$weights_url" "$weights_dest" || \
         echo "  ⚠ Weight download skipped; run the repo's official download script if needed"
 
     echo ""

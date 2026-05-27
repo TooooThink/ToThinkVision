@@ -60,36 +60,46 @@ class CoTracker3Predictor:
         try:
             import os
 
-            # Prefer local repo (avoids torch.hub GitHub download failures in China)
+            # 优先级:
+            # 1. 显式传入 checkpoint_path
+            # 2. COTRACKER_WEIGHTS 环境变量
+            # 3. 默认缓存位置 (~/.cache/tothinkvision/CoTracker3/scaled_{mode}.pth)
+            ckpt_path = self.checkpoint_path
+            if not ckpt_path:
+                ckpt_path = os.environ.get("COTRACKER_WEIGHTS")
+            if not ckpt_path:
+                default_dir = Path.home() / ".cache" / "tothinkvision" / "CoTracker3"
+                default_ckpt = default_dir / f"scaled_{self.mode}.pth"
+                if default_ckpt.exists():
+                    ckpt_path = str(default_ckpt)
+
+            # Prefer local repo (avoids torch.hub GitHub download failures in China / no-net clusters)
             local_repo = os.environ.get("COTRACKER_REPO")
-            if self.checkpoint_path and Path(self.checkpoint_path).exists():
-                # Load from local checkpoint
-                if local_repo and Path(local_repo).exists():
-                    self.model = torch.hub.load(
-                        local_repo,
-                        f"cotracker3_{self.mode}",
-                        source="local",
-                    ).to(self.device)
-                else:
-                    self.model = torch.hub.load(
-                        "facebookresearch/co-tracker",
-                        f"cotracker3_{self.mode}",
-                    ).to(self.device)
-                state_dict = torch.load(self.checkpoint_path, map_location=self.device)
-                self.model.load_state_dict(state_dict)
-            elif local_repo and Path(local_repo).exists():
-                # Load from local clone (torch.hub source='local' — no GitHub download)
-                self.model = torch.hub.load(
-                    local_repo,
-                    f"cotracker3_{self.mode}",
-                    source="local",
-                ).to(self.device)
-                logger.info("CoTracker3 loaded from local repo: %s", local_repo)
+            hub_kwargs = {}
+            if local_repo and Path(local_repo).exists():
+                hub_kwargs["source"] = "local"
+                hub_source = local_repo
+                logger.info("CoTracker3: using local repo %s", local_repo)
             else:
-                # Load via torch.hub (auto-downloads weights + repo zip from GitHub)
-                self.model = torch.hub.load(
-                    "facebookresearch/co-tracker",
+                hub_source = "facebookresearch/co-tracker"
+
+            if ckpt_path and Path(ckpt_path).exists():
+                # Load model via torch.hub, passing checkpoint_path to the factory function
+                # This bypasses the auto-download inside hubconf.py (which hits HuggingFace)
+                model = torch.hub.load(
+                    hub_source,
                     f"cotracker3_{self.mode}",
+                    checkpoint_path=ckpt_path,
+                    **hub_kwargs,
+                ).to(self.device)
+                self.model = model
+                logger.info("CoTracker3 loaded with local weights: %s", ckpt_path)
+            else:
+                # Load via torch.hub (auto-downloads weights from HuggingFace)
+                self.model = torch.hub.load(
+                    hub_source,
+                    f"cotracker3_{self.mode}",
+                    **hub_kwargs,
                 ).to(self.device)
 
             logger.info("CoTracker3 (%s mode) loaded successfully", self.mode)
