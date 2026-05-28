@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.pyo
-
+*.pyc
 # Distribution / packaging
 .Python
 build/
