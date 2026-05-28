@@ -111,11 +111,13 @@ class DepthPro:
                 import torch
 
                 if f_px is None:
-                    f_px = max(w, h)  # Default: focal length ≈ image diagonal
+                    f_px = float(max(w, h))  # Default: focal length ≈ image diagonal
 
                 input_tensor = self.transform(pil_img).to(self.device).unsqueeze(0)
                 with torch.no_grad():
-                    prediction = self.model.infer(input_tensor, f_px=f_px)
+                    # Depth Pro API expects f_px as tensor
+                    f_px_tensor = torch.tensor(f_px, device=self.device).float()
+                    prediction = self.model.infer(input_tensor, f_px=f_px_tensor)
                 depth = prediction["depth"].squeeze().cpu().numpy()
 
             elif self._backend == "huggingface":
