@@ -93,8 +93,15 @@ class SAM3Predictor:
             )
 
             # Get the interactive predictor attached to the model
-            if hasattr(self._model, "inst_interactive_predictor"):
+            if hasattr(self._model, "inst_interactive_predictor") and self._model.inst_interactive_predictor is not None:
                 self.image_predictor = self._model.inst_interactive_predictor
+
+                # Verify the predictor has required internal components
+                if not hasattr(self.image_predictor, 'forward_image') or self.image_predictor.forward_image is None:
+                    logger.warning("SAM 3 interactive predictor missing forward_image component")
+                    self.image_predictor = None
+                    return
+
                 logger.info("SAM 3 image predictor loaded")
             else:
                 logger.warning("SAM 3 model loaded but interactive predictor not available")
