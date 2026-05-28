@@ -117,13 +117,20 @@ install_depth_pro() {
 
 install_vggt() {
     echo ""
-    echo ">>> Installing VGGT..."
-    try_clone "facebookresearch/vggt" "$CACHE_DIR/vggt" 2>/dev/null && \
+    echo ">>> Installing VGGT (facebookresearch/vggt)..."
+    try_clone "facebookresearch/vggt" "$CACHE_DIR/vggt" && \
     cd "$CACHE_DIR/vggt" && \
-    pip install ${PIP_INDEX} -e . && cd - || \
-    echo "VGGT official repo install failed, using HuggingFace transformers (auto-downloads on first run)..."
-    pip install ${PIP_INDEX} "transformers>=4.47.0"
-    echo "VGGT will auto-download weights from HuggingFace (meta/VGGT) on first use."
+    pip install ${PIP_INDEX} -r requirements.txt && \
+    pip install ${PIP_INDEX} -e . && cd -
+    if [ $? -eq 0 ]; then
+        echo "VGGT installed successfully from facebookresearch/vggt"
+        echo "Weights will auto-download from HuggingFace (facebook/VGGT-1B) on first use."
+    else
+        echo "ERROR: VGGT installation failed. Please install manually:"
+        echo "  git clone https://github.com/facebookresearch/vggt.git"
+        echo "  cd vggt && pip install -r requirements.txt && pip install -e ."
+        exit 1
+    fi
 }
 
 install_3dgs() {

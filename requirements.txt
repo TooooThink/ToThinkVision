@@ -36,7 +36,7 @@ paddleocr>=2.9.0
 transformers>=4.47.0
 
 # 3D Reconstruction — VGGT (Meta, CVPR 2025) / MASt3R (fallback)
-# VGGT via HuggingFace: transformers>=4.47.0 (auto-downloads meta/VGGT)
+# VGGT: clone from https://github.com/facebookresearch/vggt
 # MASt3R fallback: clone from https://github.com/naver/mast3r
 einops>=0.8.0
 timm>=1.0.0

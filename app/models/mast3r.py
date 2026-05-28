@@ -39,23 +39,20 @@ class VGGTReconstructor:
 
     def _init_model(self):
         """Load VGGT model, fall back to MASt3R."""
-        # Try VGGT first
+        # Try VGGT first (official facebookresearch/vggt API)
         try:
             import torch
-            from transformers import AutoImageProcessor, VGGTModel
+            from vggt.models.vggt import VGGT
 
-            self.processor = AutoImageProcessor.from_pretrained(
-                "meta/VGGT",
-                cache_dir=settings.model_cache_dir,
-            )
-            self.model = VGGTModel.from_pretrained(
-                "meta/VGGT",
-                cache_dir=settings.model_cache_dir,
-            ).to(self.device)
+            dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+            self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(self.device)
+            self._dtype = dtype
             self._backend = "vggt"
-            logger.info("VGGT loaded from HuggingFace")
+            logger.info("VGGT loaded from facebookresearch/vggt")
             return
-        except (ImportError, OSError) as e:
+        except ImportError as e:
+            logger.info(f"VGGT not installed: {e}, trying MASt3R fallback")
+        except Exception as e:
             logger.info(f"VGGT load failed: {e}, trying MASt3R fallback")
 
         # Fall back to MASt3R
@@ -101,6 +98,8 @@ class VGGTReconstructor:
     def _reconstruct_vggt(self, frames_dir: Path, sample_interval: int | None) -> tuple[dict, list[dict]]:
         """VGGT 3D reconstruction — feed-forward transformer, ~0.2s."""
         import torch
+        from vggt.utils.load_fn import load_and_preprocess_images
+        from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
         sample_interval = sample_interval or settings.mast3r_sample_interval
         frame_paths = sorted(frames_dir.glob("*.png")) + sorted(frames_dir.glob("*.jpg"))
@@ -110,20 +109,17 @@ class VGGTReconstructor:
             raise RuntimeError("Not enough frames for VGGT reconstruction (< 2 after sampling)")
 
         try:
-            from PIL import Image as PILImage
-
-            # Load images as PIL
-            images = [PILImage.open(str(p)).convert("RGB") for p in sampled_paths]
-
-            # Process through VGGT
-            inputs = self.processor(images=images, return_tensors="pt").to(self.device)
+            # Load and preprocess images using official VGGT API
+            image_paths = [str(p) for p in sampled_paths]
+            images = load_and_preprocess_images(image_paths).to(self.device)
 
             with torch.no_grad():
-                outputs = self.model(**inputs)
+                with torch.cuda.amp.autocast(dtype=self._dtype):
+                    predictions = self.model(images)
 
             # Extract point cloud and camera poses from VGGT outputs
-            points_3d, colors = self._extract_vggt_pointcloud(outputs, images)
-            camera_poses = self._extract_vggt_poses(outputs, sampled_paths, sample_interval)
+            points_3d, colors = self._extract_vggt_pointcloud(predictions, image_paths)
+            camera_poses = self._extract_vggt_poses(predictions, sampled_paths, sample_interval)
 
             return {"points": points_3d.tolist(), "colors": colors.tolist()}, camera_poses
         except Exception as e:
@@ -138,36 +134,38 @@ class VGGTReconstructor:
                     self._backend = old_backend
             raise RuntimeError(f"VGGT reconstruction failed: {e}")
 
-    def _extract_vggt_pointcloud(self, outputs, images: list) -> tuple[np.ndarray, np.ndarray]:
-        """Extract point cloud from VGGT outputs."""
+    def _extract_vggt_pointcloud(self, predictions, image_paths: list) -> tuple[np.ndarray, np.ndarray]:
+        """Extract point cloud from VGGT predictions."""
+        from PIL import Image as PILImage
         import torch
 
         all_points = []
         all_colors = []
 
-        # VGGT outputs: pointmaps per view
-        pointmaps = getattr(outputs, 'pointmaps', None)
-        if pointmaps is None and hasattr(outputs, 'world_points'):
-            pointmaps = outputs.world_points
+        # VGGT outputs point maps per view
+        pointmaps = predictions.get('point') if isinstance(predictions, dict) else getattr(predictions, 'point', None)
+        if pointmaps is None:
+            pointmaps = predictions.get('point_map') if isinstance(predictions, dict) else getattr(predictions, 'point_map', None)
 
         if pointmaps is not None:
             if isinstance(pointmaps, torch.Tensor):
                 pointmaps = pointmaps.cpu().numpy()
 
             for i in range(pointmaps.shape[0]):
-                pts = pointmaps[i]  # [H, W, 3]
+                pts = pointmaps[i]  # [H, W, 3] or [3, H, W]
+                if pts.shape[0] == 3:
+                    pts = pts.transpose(1, 2, 0)  # [H, W, 3]
+
                 pts_flat = pts.reshape(-1, 3)
                 valid = np.isfinite(pts_flat).all(axis=1) & (np.abs(pts_flat) < 100).all(axis=1)
                 pts_valid = pts_flat[valid]
 
                 # Get colors from source image
-                if i < len(images):
-                    img_np = np.array(images[i])
-                    if img_np.shape[:2] == pts.shape[:2]:
-                        img_flat = img_np.reshape(-1, 3)
-                        colors_valid = img_flat[valid]
-                    else:
-                        colors_valid = np.ones((len(pts_valid), 3), dtype=np.uint8) * 128
+                if i < len(image_paths):
+                    img = PILImage.open(image_paths[i]).convert("RGB")
+                    img_np = np.array(img.resize((pts.shape[1], pts.shape[0])))
+                    img_flat = img_np.reshape(-1, 3)
+                    colors_valid = img_flat[valid]
                 else:
                     colors_valid = np.ones((len(pts_valid), 3), dtype=np.uint8) * 128
 
@@ -189,43 +187,61 @@ class VGGTReconstructor:
 
         return points, colors
 
-    def _extract_vggt_poses(self, outputs, frame_paths: list,
+    def _extract_vggt_poses(self, predictions, frame_paths: list,
                             sample_interval: int) -> list[dict]:
-        """Extract camera poses from VGGT outputs."""
+        """Extract camera poses from VGGT predictions."""
+        import torch
+        from vggt.utils.pose_enc import pose_encoding_to_extri_intri
+
         poses = []
 
-        # VGGT outputs camera poses
-        cameras = getattr(outputs, 'cameras', None)
-        if cameras is None and hasattr(outputs, 'camera_poses'):
-            cameras = outputs.camera_poses
+        # Extract camera parameters from predictions
+        camera_params = predictions.get('camera') if isinstance(predictions, dict) else getattr(predictions, 'camera', None)
 
-        for i in range(len(frame_paths)):
-            h, w = 512, 512
-            K = estimate_intrinsics(w, h)
+        if camera_params is not None:
+            # Convert pose encoding to extrinsic/intrinsic matrices
+            with torch.no_grad():
+                extrinsic, intrinsic = pose_encoding_to_extri_intri(camera_params, (512, 512))
 
-            if cameras is not None:
-                if isinstance(cameras, (list, tuple)):
-                    RT = np.array(cameras[i]) if i < len(cameras) else np.eye(4)
+            if isinstance(extrinsic, torch.Tensor):
+                extrinsic = extrinsic.cpu().numpy()
+            if isinstance(intrinsic, torch.Tensor):
+                intrinsic = intrinsic.cpu().numpy()
+
+            for i in range(len(frame_paths)):
+                if i < extrinsic.shape[0]:
+                    RT = extrinsic[i]
+                    K = intrinsic[i] if intrinsic.ndim == 3 else intrinsic
                 else:
-                    cam_arr = np.array(cameras)
-                    if cam_arr.ndim == 3:
-                        RT = cam_arr[i] if i < cam_arr.shape[0] else np.eye(4)
-                    else:
-                        RT = np.eye(4)
-            else:
+                    RT = np.eye(4)
+                    K = estimate_intrinsics(512, 512)
+
+                R = RT[:3, :3]
+                position = rt_matrix_to_position(R, RT[:3, 3])
+                rotation = rt_matrix_to_quaternion(R)
+
+                poses.append({
+                    "frame_idx": i * sample_interval,
+                    "intrinsics": K.tolist() if isinstance(K, np.ndarray) else K,
+                    "extrinsics": RT.tolist(),
+                    "position": tuple(float(x) for x in position),
+                    "rotation": tuple(float(x) for x in rotation),
+                })
+        else:
+            # Fallback: identity poses
+            for i in range(len(frame_paths)):
+                K = estimate_intrinsics(512, 512)
                 RT = np.eye(4)
+                position = rt_matrix_to_position(RT[:3, :3], RT[:3, 3])
+                rotation = rt_matrix_to_quaternion(RT[:3, :3])
 
-            R = RT[:3, :3]
-            position = rt_matrix_to_position(R, RT[:3, 3])
-            rotation = rt_matrix_to_quaternion(R)
-
-            poses.append({
-                "frame_idx": i * sample_interval,
-                "intrinsics": K.tolist(),
-                "extrinsics": RT.tolist(),
-                "position": tuple(float(x) for x in position),
-                "rotation": tuple(float(x) for x in rotation),
-            })
+                poses.append({
+                    "frame_idx": i * sample_interval,
+                    "intrinsics": K.tolist(),
+                    "extrinsics": RT.tolist(),
+                    "position": tuple(float(x) for x in position),
+                    "rotation": tuple(float(x) for x in rotation),
+                })
 
         return poses
 
