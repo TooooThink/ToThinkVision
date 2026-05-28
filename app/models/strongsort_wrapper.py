@@ -71,21 +71,22 @@ class BoTSORTTracker:
 
             if needs_args:
                 # Construct a Namespace-like object with tracker config
+                # BOTSORT needs: track_buffer, track_high_thresh, track_low_thresh,
+                # proximity_thresh, appearance_thresh, with_reid, gmc_method, fuse_score
                 from argparse import Namespace
                 tracker_args = Namespace(
-                    tracking_method="botsort",
-                    tracking_model="yolov8n.pt",
+                    track_buffer=30,
                     track_high_thresh=0.5,
                     track_low_thresh=0.1,
                     new_track_thresh=0.6,
-                    track_buffer=30,
                     match_thresh=0.8,
                     proximity_thresh=0.5,
                     appearance_thresh=0.25,
-                    fuse_first_frame=True,
-                    with_reid=True,
+                    with_reid=False,
+                    gmc_method="sparseOptFlow",
+                    fuse_score=True,
                 )
-                self.tracker = BOTSORT(tracker_args)
+                self.tracker = BOTSORT(tracker_args, frame_rate=int(self.fps))
             elif has_var_keyword:
                 use_kwargs = candidate_kwargs
                 self.tracker = BOTSORT(**use_kwargs)
