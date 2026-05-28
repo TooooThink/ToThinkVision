@@ -51,9 +51,9 @@ class VGGTReconstructor:
             logger.info("VGGT loaded from facebookresearch/vggt")
             return
         except ImportError as e:
-            logger.info(f"VGGT not installed: {e}, trying MASt3R fallback")
+            logger.warning(f"VGGT not installed: {e}, trying MASt3R fallback")
         except Exception as e:
-            logger.info(f"VGGT load failed: {e}, trying MASt3R fallback")
+            logger.warning(f"VGGT load failed: {e}, trying MASt3R fallback", exc_info=True)
 
         # Fall back to MASt3R
         try:
