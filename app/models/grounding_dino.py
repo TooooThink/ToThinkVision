@@ -122,7 +122,13 @@ class GroundingDINO:
             os.environ["HUGGINGFACE_HUB_CACHE"] = str(cache)
 
             from groundingdino.util.inference import load_model
+            import torch
+            # Force float32 default dtype — CUDA extension doesn't support BFloat16
+            torch.set_default_dtype(torch.float32)
             self.model = load_model(str(config_path), str(model_path), device=self.device)
+            # Force float32 — CUDA extension doesn't support BFloat16
+            if hasattr(self.model, 'float'):
+                self.model = self.model.float()
             self._backend = "official"
             logger.info("GroundingDINO loaded from official repo (%s)", model_path)
             return
@@ -203,20 +209,23 @@ class GroundingDINO:
 
     def _detect_official(self, img: np.ndarray, caption: str) -> list[dict]:
         """Detect using official IDEA-Research GroundingDINO API."""
+        import torch
         import torchvision.transforms.functional as F
         from groundingdino.util.inference import predict
 
         # Convert numpy array to tensor: (H, W, C) RGB -> (C, H, W) normalized
-        image_tensor = F.to_tensor(img).to(self.device)
+        image_tensor = F.to_tensor(img).float().to(self.device)
 
-        boxes, logits, phrases = predict(
-            model=self.model,
-            image=image_tensor,
-            caption=caption,
-            box_threshold=settings.detection_threshold,
-            text_threshold=0.25,
-            device=self.device,
-        )
+        # Disable autocast — CUDA extension doesn't support BFloat16
+        with torch.cuda.amp.autocast(enabled=False):
+            boxes, logits, phrases = predict(
+                model=self.model,
+                image=image_tensor,
+                caption=caption,
+                box_threshold=settings.detection_threshold,
+                text_threshold=0.25,
+                device=self.device,
+            )
 
         h, w = img.shape[:2]
         detections = []
