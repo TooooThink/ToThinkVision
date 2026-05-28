@@ -37,36 +37,48 @@ class BoTSORTTracker:
             return
 
         # Try Ultralytics BoT-SORT first (most common install path)
+        #
+        # BOTSORT.__init__() API varies wildly across ultralytics versions:
+        #   - old:  BOTSORT(model_weights=None, track_high_thresh=0.5, ...)
+        #   - mid:  BOTSORT(track_high_thresh=0.5, ...)
+        #   - new:  BOTSORT()  ← no params, reads from cfg
+        #
+        # Strategy: inspect __init__ signature and only pass accepted kwargs
         try:
+            import inspect
             from ultralytics.trackers.bot_sort import BOTSORT
 
-            # API changed across ultralytics versions — try without model_weights first
-            try:
-                self.tracker = BOTSORT(
-                    track_high_thresh=0.5,
-                    track_low_thresh=0.1,
-                    new_track_thresh=0.6,
-                    track_buffer=30,
-                    match_thresh=0.8,
-                    proximity_thresh=0.5,
-                    appearance_thresh=0.25,
-                    fuse_first_frame=True,
-                )
-            except TypeError:
-                # Older version might need model_weights
-                self.tracker = BOTSORT(
-                    model_weights=None,
-                    track_high_thresh=0.5,
-                    track_low_thresh=0.1,
-                    new_track_thresh=0.6,
-                    track_buffer=30,
-                    match_thresh=0.8,
-                    proximity_thresh=0.5,
-                    appearance_thresh=0.25,
-                    fuse_first_frame=True,
-                )
+            sig = inspect.signature(BOTSORT.__init__)
+            accepted = set(sig.parameters.keys()) - {"self"}
+            logger.debug("BOTSORT.__init__ accepts: %s", accepted)
+
+            # Build kwargs from what the constructor actually accepts
+            candidate_kwargs = {
+                "track_high_thresh": 0.5,
+                "track_low_thresh": 0.1,
+                "new_track_thresh": 0.6,
+                "track_buffer": 30,
+                "match_thresh": 0.8,
+                "proximity_thresh": 0.5,
+                "appearance_thresh": 0.25,
+                "fuse_first_frame": True,
+                "model_weights": None,
+            }
+
+            # If **kwargs in signature, pass everything
+            has_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+            if has_var_keyword:
+                use_kwargs = candidate_kwargs
+            else:
+                use_kwargs = {k: v for k, v in candidate_kwargs.items() if k in accepted}
+
+            self.tracker = BOTSORT(**use_kwargs)
             self._backend = "ultralytics"
-            logger.info("BoT-SORT initialized (ultralytics)")
+            logger.info("BoT-SORT initialized (ultralytics, params: %s)",
+                        list(use_kwargs.keys()) or "none")
             return
         except (ImportError, AttributeError):
             logger.info("ultralytics BOTSORT not available, trying standalone botsort")
