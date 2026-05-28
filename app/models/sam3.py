@@ -53,9 +53,23 @@ class SAM3Predictor:
                 enable_segmentation=True,
             )
 
+            # Verify the backbone actually loaded (not None from a bad checkpoint)
+            if hasattr(self._model, "backbone") and self._model.backbone is None:
+                raise RuntimeError(
+                    f"SAM 3 backbone is None — checkpoint '{ckpt}' is incompatible or incomplete. "
+                    "Try deleting the local checkpoint and re-downloading: "
+                    f"rm -rf {Path(ckpt).parent}"
+                )
+
             # Get the interactive predictor attached to the model
             if hasattr(self._model, "inst_interactive_predictor") and self._model.inst_interactive_predictor is not None:
                 self.image_predictor = self._model.inst_interactive_predictor
+
+                # Share the main model's backbone with the tracker predictor
+                # (build_tracker defaults to with_backbone=False, so tracker.backbone is None)
+                if self.image_predictor.model.backbone is None:
+                    self.image_predictor.model.backbone = self._model.backbone
+                    logger.info("SAM 3: shared main backbone with interactive predictor")
 
                 # Verify the predictor has required methods for the API we use
                 required_methods = ['set_image', 'predict']
