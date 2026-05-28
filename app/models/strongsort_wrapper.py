@@ -96,8 +96,8 @@ class BoTSORTTracker:
             logger.info("BoT-SORT initialized (ultralytics, %s)",
                         "args=Namespace" if needs_args else f"params: {list(use_kwargs.keys()) or 'none'}")
             return
-        except (ImportError, AttributeError):
-            logger.info("ultralytics BOTSORT not available, trying standalone botsort")
+        except ImportError:
+            logger.warning("ultralytics BOTSORT not available, trying standalone botsort")
 
         # Try standalone botsort package
         try:
@@ -114,9 +114,12 @@ class BoTSORTTracker:
             logger.info("BoT-SORT initialized (botsort package)")
             return
         except ImportError:
-            logger.warning("botsort package not installed, using IoU fallback")
+            raise RuntimeError(
+                "BoT-SORT is required but not installed. Install with: "
+                "pip install ultralytics"
+            )
         except Exception as e:
-            logger.warning(f"BoT-SORT init failed: {e}")
+            raise RuntimeError(f"BoT-SORT init failed: {e}")
 
     def update(self, detections: list[dict], frame: np.ndarray | None = None,
                frame_idx: int = 0) -> list[dict]:
@@ -130,116 +133,42 @@ class BoTSORTTracker:
         Returns:
             list of tracked objects with persistent IDs
         """
-        if self.tracker is not None:
-            return self._update_botsort(detections, frame, frame_idx)
-        else:
-            return self._update_iou(detections, frame_idx)
+        return self._update_botsort(detections, frame, frame_idx)
 
     def _update_botsort(self, detections: list[dict], frame: np.ndarray | None,
                         frame_idx: int) -> list[dict]:
         """Update using BoT-SORT."""
-        try:
-            # Convert detections to format: [x1, y1, x2, y2, conf]
-            bboxes = []
-            for det in detections:
-                x, y, w, h = det["bbox"]
-                bboxes.append([x, y, x + w, y + h, det.get("confidence", 0.5)])
-            bboxes = np.array(bboxes)
+        # Convert detections to format: [x1, y1, x2, y2, conf]
+        bboxes = []
+        for det in detections:
+            x, y, w, h = det["bbox"]
+            bboxes.append([x, y, x + w, y + h, det.get("confidence", 0.5)])
+        bboxes = np.array(bboxes)
 
-            if self._backend == "ultralytics":
-                tracks = self.tracker.update(bboxes, frame)
-            else:
-                tracks = self.tracker.update(bboxes, frame)
+        if self._backend == "ultralytics":
+            tracks = self.tracker.update(bboxes, frame)
+        else:
+            tracks = self.tracker.update(bboxes, frame)
 
-            results = []
-            for track in tracks:
-                x1, y1, x2, y2, track_id, conf, *_ = track[:7]
-                track_id_str = f"obj_{int(track_id):04d}"
-                if track_id_str not in self.tracks:
-                    self.tracks[track_id_str] = {"history": []}
+        results = []
+        for track in tracks:
+            x1, y1, x2, y2, track_id, conf, *_ = track[:7]
+            track_id_str = f"obj_{int(track_id):04d}"
+            if track_id_str not in self.tracks:
+                self.tracks[track_id_str] = {"history": []}
 
-                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-                self.tracks[track_id_str]["history"].append({
-                    "x": float(cx), "y": float(cy), "t": frame_idx
-                })
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            self.tracks[track_id_str]["history"].append({
+                "x": float(cx), "y": float(cy), "t": frame_idx
+            })
 
-                results.append({
-                    "id": track_id_str,
-                    "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
-                    "confidence": float(conf),
-                    "history": self.tracks[track_id_str]["history"],
-                })
-            return results
-        except Exception as e:
-            logger.error(f"BoT-SORT update failed: {e}, falling back to IoU")
-            return self._update_iou(detections, frame_idx)
-
-    def _update_iou(self, detections: list[dict], frame_idx: int) -> list[dict]:
-        """Simple IoU-based fallback tracking."""
-        if not self.tracks:
-            for det in detections:
-                track_id = f"obj_{self.next_track_id:04d}"
-                self.next_track_id += 1
-                bbox = det["bbox"]
-                cx, cy = bbox[0] + bbox[2] / 2, bbox[1] + bbox[3] / 2
-                self.tracks[track_id] = {
-                    "bbox": bbox,
-                    "label": det.get("label", "unknown"),
-                    "confidence": det.get("confidence", 0.5),
-                    "appear_frame": frame_idx,
-                    "disappear_frame": -1,
-                    "history": [{"x": cx, "y": cy, "t": frame_idx}],
-                }
-            return self._format_tracks()
-
-        # IoU matching
-        track_ids = list(self.tracks.keys())
-        matched_dets = set()
-        for i, det in enumerate(detections):
-            best_tid, best_iou = None, 0
-            for tid in track_ids:
-                iou = self._calc_iou(det["bbox"], self.tracks[tid]["bbox"])
-                if iou > best_iou and iou > 0.3:
-                    best_iou = iou
-                    best_tid = tid
-
-            if best_tid:
-                self.tracks[best_tid]["bbox"] = det["bbox"]
-                self.tracks[best_tid]["disappear_frame"] = -1
-                cx = det["bbox"][0] + det["bbox"][2] / 2
-                cy = det["bbox"][1] + det["bbox"][3] / 2
-                self.tracks[best_tid]["history"].append({"x": cx, "y": cy, "t": frame_idx})
-                matched_dets.add(i)
-            else:
-                track_id = f"obj_{self.next_track_id:04d}"
-                self.next_track_id += 1
-                bbox = det["bbox"]
-                self.tracks[track_id] = {
-                    "bbox": bbox,
-                    "label": det.get("label", "unknown"),
-                    "confidence": det.get("confidence", 0.5),
-                    "appear_frame": frame_idx,
-                    "disappear_frame": -1,
-                    "history": [{"x": bbox[0] + bbox[2] / 2, "y": bbox[1] + bbox[3] / 2, "t": frame_idx}],
-                }
-
-        # Mark unmatched tracks as disappeared
-        for tid in track_ids:
-            bbox = self.tracks[tid]["bbox"]
-            if not any(self._calc_iou(d["bbox"], bbox) > 0.3 for i, d in enumerate(detections) if i not in matched_dets):
-                if self.tracks[tid]["disappear_frame"] == -1:
-                    self.tracks[tid]["disappear_frame"] = frame_idx - 1
-
-        return self._format_tracks()
-
-    def _calc_iou(self, b1: list[float], b2: list[float]) -> float:
-        x1, y1, w1, h1 = b1
-        x2, y2, w2, h2 = b2
-        ix = max(0, min(x1 + w1, x2 + w2) - max(x1, x2))
-        iy = max(0, min(y1 + h1, y2 + h2) - max(y1, y2))
-        inter = ix * iy
-        union = w1 * h1 + w2 * h2 - inter
-        return inter / union if union > 0 else 0.0
+            results.append({
+                "id": track_id_str,
+                "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
+                "confidence": float(conf),
+                "history": self.tracks[track_id_str]["history"],
+            })
+        return results
 
     def _format_tracks(self) -> list[dict]:
         results = []

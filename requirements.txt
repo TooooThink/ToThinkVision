@@ -47,8 +47,7 @@ timm>=1.0.0
 plyfile>=1.0
 
 # Tracking — BoT-SORT (upgraded from StrongSORT)
-# pip install ultralytics  (includes BoT-SORT tracker)
-# Or standalone: pip install botsort
+ultralytics>=8.3.0
 
 # Video processing
 opencv-python>=4.10.0
