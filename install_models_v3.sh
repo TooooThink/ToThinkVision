@@ -534,47 +534,122 @@ install_shape_of_motion() {
     #   https://github.com/vye16/shape-of-motion/releases/download/v0.0.1/paper-windmill.zip
     #   156MB zip, contains checkpoint + configs
     #
-    # GitHub 下载走 gh-proxy（国内镜像）
+    # 注意: GitHub release assets 会重定向到 AWS S3，gh-proxy.com 不一定跟得住
+    # 需要验证下载的文件确实是 zip（检查 magic bytes）
     #
     local weights_dir="$CACHE_DIR/ShapeOfMotion"
     mkdir -p "$weights_dir"
     local zip_dest="$weights_dir/paper-windmill.zip"
     local raw_url="https://github.com/vye16/shape-of-motion/releases/download/v0.0.1/paper-windmill.zip"
-    local proxy_url="https://gh-proxy.com/$raw_url"
 
     echo ""
     echo "  === Downloading Shape of Motion weights ==="
     echo "  Target: $weights_dir"
     echo ""
 
-    if [ ! -d "$weights_dir/paper-windmill" ] && [ ! -f "$zip_dest" ]; then
-        echo "  Trying direct GitHub download..."
-        if curl -fSL --retry 3 -o "$zip_dest" "$raw_url"; then
-            echo "  ✓ Downloaded paper-windmill.zip"
-        else
-            echo "  Direct download failed, trying gh-proxy.com mirror..."
-            if curl -fSL --retry 3 -o "$zip_dest" "$proxy_url"; then
-                echo "  ✓ Downloaded via gh-proxy.com"
+    # Helper: validate zip file by checking magic bytes (PK\x03\x04)
+    _is_valid_zip() {
+        [ -f "$1" ] && [ "$(head -c4 "$1" | xxd -p)" = "504b0304" ]
+    }
+
+    if [ ! -d "$weights_dir/paper-windmill" ]; then
+        # Clean up any previous invalid download
+        if [ -f "$zip_dest" ] && ! _is_valid_zip "$zip_dest"; then
+            echo "  Removing previous invalid zip..."
+            rm -f "$zip_dest"
+        fi
+
+        if [ ! -f "$zip_dest" ]; then
+            # Method 1: direct GitHub (works if you have foreign network access)
+            echo "  Method 1: Direct GitHub download..."
+            if curl -fSL --retry 3 --connect-timeout 15 -o "$zip_dest" "$raw_url" 2>&1; then
+                if _is_valid_zip "$zip_dest"; then
+                    echo "  ✓ Downloaded (direct)"
+                else
+                    echo "  ⚠ Downloaded but file is not a valid zip"
+                    echo "    First bytes: $(head -c100 "$zip_dest" | strings | head -1)"
+                    rm -f "$zip_dest"
+                fi
             else
                 rm -f "$zip_dest"
-                echo "  ❌ Download failed"
+                echo "  ⚠ Direct download failed"
+            fi
+        fi
+
+        if [ ! -f "$zip_dest" ]; then
+            # Method 2: gh-proxy.com
+            echo "  Method 2: gh-proxy.com mirror..."
+            if curl -fSL --retry 3 --connect-timeout 15 -o "$zip_dest" "https://gh-proxy.com/$raw_url" 2>&1; then
+                if _is_valid_zip "$zip_dest"; then
+                    echo "  ✓ Downloaded (gh-proxy.com)"
+                else
+                    echo "  ⚠ Downloaded but file is not a valid zip (proxy returned error page)"
+                    echo "    First bytes: $(head -c100 "$zip_dest" | strings | head -1)"
+                    rm -f "$zip_dest"
+                fi
+            else
+                rm -f "$zip_dest"
+                echo "  ⚠ gh-proxy.com failed"
+            fi
+        fi
+
+        if [ ! -f "$zip_dest" ]; then
+            # Method 3: ghproxy.com (different mirror)
+            echo "  Method 3: ghproxy.com mirror..."
+            if curl -fSL --retry 3 --connect-timeout 15 -o "$zip_dest" "https://ghproxy.com/$raw_url" 2>&1; then
+                if _is_valid_zip "$zip_dest"; then
+                    echo "  ✓ Downloaded (ghproxy.com)"
+                else
+                    echo "  ⚠ Not a valid zip"
+                    rm -f "$zip_dest"
+                fi
+            else
+                rm -f "$zip_dest"
+                echo "  ⚠ ghproxy.com failed"
+            fi
+        fi
+
+        if [ ! -f "$zip_dest" ]; then
+            # Method 4: wget (sometimes handles redirects better)
+            if command -v wget &>/dev/null; then
+                echo "  Method 4: wget..."
+                if wget --tries=3 --timeout=30 -O "$zip_dest" "$raw_url" 2>&1; then
+                    if _is_valid_zip "$zip_dest"; then
+                        echo "  ✓ Downloaded (wget)"
+                    else
+                        rm -f "$zip_dest"
+                    fi
+                else
+                    rm -f "$zip_dest"
+                fi
             fi
         fi
     fi
 
-    if [ -f "$zip_dest" ]; then
+    # Extract if we have a valid zip
+    if [ -f "$zip_dest" ] && _is_valid_zip "$zip_dest" && [ ! -d "$weights_dir/paper-windmill" ]; then
         echo "  Extracting paper-windmill.zip..."
         unzip -qo "$zip_dest" -d "$weights_dir" && \
             echo "  ✓ Extracted to: $weights_dir/paper-windmill" || \
-            echo "  ⚠ unzip failed, extract manually: $zip_dest"
+            echo "  ⚠ unzip failed"
+    elif [ -d "$weights_dir/paper-windmill" ]; then
+        echo "  ✓ Already extracted: $weights_dir/paper-windmill"
     fi
 
     if [ ! -d "$weights_dir/paper-windmill" ]; then
         echo ""
-        echo "  ⚠ Weights not available. Download manually:"
-        echo "    URL: $raw_url"
-        echo "    Save to: $zip_dest"
-        echo "    Then: unzip $zip_dest -d $weights_dir"
+        echo "  ⚠ Weights not available. Manual download:"
+        echo ""
+        echo "  1. Open in browser (needs foreign network / VPN):"
+        echo "     $raw_url"
+        echo ""
+        echo "  2. Download paper-windmill.zip (156MB)"
+        echo ""
+        echo "  3. scp to cluster:"
+        echo "     scp paper-windmill.zip cluster:$weights_dir/"
+        echo ""
+        echo "  4. Re-run this script, or manually:"
+        echo "     unzip $zip_dest -d $weights_dir"
     fi
 
     echo ""

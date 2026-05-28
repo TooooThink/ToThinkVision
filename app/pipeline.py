@@ -250,6 +250,7 @@ def _process_image(file_path: Path, config: PipelineConfig) -> StructuredOutput:
 def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     """Process a video through the full v2 pipeline with 3D reconstruction."""
     start_time = time.time()
+    model_versions: dict[str, str] = {}
 
     # ─── Extract frames (persist to output dir so MASt3R/3DGS can access) ──
     frame_dir = settings.output_dir / f"{file_path.stem}_frames"
@@ -824,7 +825,9 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
 
     # ─── Build output ───────────────────────────────────────
     elapsed = time.time() - start_time
-    model_versions = {}
+    # NOTE: model_versions dict is populated throughout the pipeline above
+    # (including 4D stages: cotracker3, trajectory_4d, scene_graph, animated_gltf)
+    # Do NOT reset it here.
     if config.enable_sam3:
         model_versions["segmentation"] = "sam3"
     if config.enable_omniparser and config.mode == "ui":

@@ -3,20 +3,35 @@
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=02:00:00
+#SBATCH --mem=48G
+#SBATCH --time=03:00:00
 #SBATCH --output=logs/ttv_real_%j.out
 #SBATCH --error=logs/ttv_real_%j.err
 
 # ============================================================================
 # ToThinkVision — Real Model Inference Test
 # ============================================================================
+# Three end-to-end tests:
+#
+#   Test 1: Image → 2D (detect + segment + LaMa + PSD layers)
+#           Input:  test_input.png
+#           Output: per-object crops, masks, PSD file for Photoshop
+#
+#   Test 2: Video → 3D (full pipeline: detect + segment + depth + 3DGS + mesh)
+#           Input:  test_input.mp4
+#           Output: per-object 3D meshes, point cloud, glTF, OBJ+MTL
+#
+#   Test 3: Video → 4D (full 3D pipeline + CoTracker3 + 4D trajectory + scene graph + animated export)
+#           Input:  test_input.mp4
+#           Output: animated glTF (.glb), USD (.usda), Blender scene, scene graph JSON
+#
 # Before sbatch:
 #   1. Place your test file(s) in the project dir:
 #      - test_input.png   (image test)
-#      - test_input.mp4   (video test, optional)
-#   2. Download model weights via install_models.sh or manually:
-#      bash install_models.sh
+#      - test_input.mp4   (video test, used by Test 2 and Test 3)
+#   2. Install models:
+#      bash install_models.sh          # v1/v2 models (Test 1+2)
+#      bash install_models_v3.sh       # v3 models: CoTracker3, ObjectGS, Spann3R (Test 3)
 #   3. Submit:
 #      sbatch run_test_real.sh
 # ============================================================================
@@ -61,6 +76,20 @@ if [ -n "$TORCH_LIB" ] && [ -d "$TORCH_LIB" ]; then
     export LD_LIBRARY_PATH="$TORCH_LIB:$LD_LIBRARY_PATH"
     echo "Added $TORCH_LIB to LD_LIBRARY_PATH"
 fi
+
+# ── Model repo env vars (set by install_models_v3.sh, re-export for SLURM) ──
+REPOS_DIR="${MODEL_REPOS_DIR:-$HOME/.local/share/tothinkvision/repos}"
+[ -d "$REPOS_DIR/co-tracker" ] && export COTRACKER_REPO="$REPOS_DIR/co-tracker"
+[ -d "$REPOS_DIR/ObjectGS" ] && export OBJECT_GS_PATH="$REPOS_DIR/ObjectGS"
+[ -d "$REPOS_DIR/Spann3R" ] && export SPANN3R_PATH="$REPOS_DIR/Spann3R"
+[ -d "$REPOS_DIR/shape-of-motion" ] && export SHAPE_OF_MOTION_PATH="$REPOS_DIR/shape-of-motion"
+
+echo ""
+echo "── Model repos ──"
+echo "COTRACKER_REPO=${COTRACKER_REPO:-(not set)}"
+echo "OBJECT_GS_PATH=${OBJECT_GS_PATH:-(not set)}"
+echo "SPANN3R_PATH=${SPANN3R_PATH:-(not set)}"
+echo "SHAPE_OF_MOTION_PATH=${SHAPE_OF_MOTION_PATH:-(not set)}"
 
 # ── Check model weights ──
 echo ""
@@ -181,6 +210,146 @@ if os.path.exists('test_input.mp4'):
 else:
     print()
     print('SKIPPED: test_input.mp4 not found')
+
+# ── Test 3: Video — 4D path (full pipeline + 4D trajectory + animated export) ──
+if os.path.exists('test_input.mp4'):
+    print()
+    print('='*60)
+    print('TEST 3: Video — 4D path — test_input.mp4')
+    print('  Pipeline: detect → segment → track → depth → 3D recon → mesh')
+    print('         → CoTracker3 → 4D trajectory → scene graph → animated export')
+    print('  Output:   animated glTF + USD + Blender + scene graph JSON')
+    print('='*60)
+
+    from app.exporters.animated_gltf_exporter import AnimatedGLTFExporter
+    from app.exporters.usd_exporter import USDExporter
+    from app.exporters.blender_exporter import BlenderExporter
+
+    start = time.time()
+
+    # Full 4D config: everything enabled
+    config_4d = PipelineConfig(
+        # ── Perception ──
+        enable_sam3=True,
+        enable_grounding_dino=True,
+        enable_omniparser=False,
+        enable_strongsort=True,
+        # ── Depth + 3D reconstruction ──
+        enable_depth_pro=True,
+        enable_mast3r=True,
+        enable_3d_reconstruction=True,
+        enable_spann3r=True,            # Spann3R first, fallback MASt3R/VGGT
+        # ── Mesh + splatting ──
+        enable_gaussian_splatting=True,
+        enable_objectgs=True,           # Per-object 3DGS
+        enable_completion_2d=True,
+        enable_completion_3d=True,
+        # ── 4D stages ──
+        enable_cotracker3=True,         # Dense point tracking
+        enable_shape_of_motion=False,   # End-to-end 4D (optional, heavy)
+        enable_4d_trajectory=True,      # Per-object 6DoF trajectories
+        enable_4dgs=False,              # 4D Gaussian Splatting (very heavy, multi-GPU)
+        enable_scene_graph=True,        # Dynamic scene graph
+        enable_animated_export=True,    # Animated glTF / USD / Blender
+        # ── Tuning ──
+        trajectory_smoothing=0.5,
+        icp_distance_threshold=0.05,
+        deformation_threshold=0.3,
+        mode='general',
+    )
+
+    result = process_file(Path('test_input.mp4'), mode='video', config=config_4d)
+    elapsed = time.time() - start
+
+    print(f'Duration: {elapsed:.1f}s')
+    print(f'Objects: {len(result.objects)}')
+    print(f'Point cloud: {len(result.point_cloud.points) if result.point_cloud else 0} points')
+    print(f'Camera poses: {len(result.camera_poses)} frames')
+    print(f'Model versions: {result.model_versions}')
+    print()
+
+    # ── Per-object details ──
+    print('── Objects ──')
+    for obj in result.objects:
+        print(f'  [{obj.id}] {obj.label}')
+        if obj.mesh_3d:
+            print(f'    mesh: {len(obj.mesh_3d.vertices)}v / {len(obj.mesh_3d.faces)}f')
+        if obj.trajectory_4d:
+            t = obj.trajectory_4d
+            print(f'    4D trajectory:')
+            print(f'      motion_type: {t.motion_type}')
+            print(f'      keyframes: {len(t.keyframes)}')
+            print(f'      total_distance: {t.total_distance:.4f} m')
+            print(f'      max_speed: {t.max_speed:.4f} m/s')
+            if t.keyframes:
+                kf0 = t.keyframes[0]
+                kfn = t.keyframes[-1]
+                print(f'      first: pos={kf0.position} rot={kf0.rotation}')
+                print(f'      last:  pos={kfn.position} rot={kfn.rotation}')
+        if obj.temporal and obj.temporal.trajectory:
+            print(f'    2D trajectory: {len(obj.temporal.trajectory)} frames')
+
+    # ── Scene graph ──
+    print()
+    print('── Scene Graph ──')
+    if result.scene_graph_4d:
+        sg = result.scene_graph_4d
+        print(f'  Nodes: {len(sg.nodes)}')
+        print(f'  Edges: {len(sg.edges)}')
+        print(f'  Time range: {sg.time_range}')
+        if sg.interaction_events:
+            print(f'  Interactions: {len(sg.interaction_events)}')
+            for evt in sg.interaction_events[:5]:
+                print(f'    {evt}')
+        for edge in sg.edges[:10]:
+            print(f'  {edge.source_id} → {edge.relation} → {edge.target_id}  '
+                  f'(t={edge.time_range}, conf={edge.confidence:.2f})')
+    else:
+        print('  (no scene graph built)')
+
+    # ── Animated exports ──
+    print()
+    print('── Animated Exports ──')
+    if result.animated_gltf_path:
+        p = Path(result.animated_gltf_path)
+        sz = p.stat().st_size if p.exists() else 0
+        print(f'  Animated glTF: {p} ({sz/1024:.1f} KB)')
+    else:
+        print('  Animated glTF: (not generated)')
+
+    if result.usd_path:
+        p = Path(result.usd_path)
+        sz = p.stat().st_size if p.exists() else 0
+        print(f'  USD scene:     {p} ({sz/1024:.1f} KB)')
+    else:
+        print('  USD scene:     (not generated)')
+
+    if result.blend_path:
+        p = Path(result.blend_path)
+        sz = p.stat().st_size if p.exists() else 0
+        print(f'  Blender scene: {p} ({sz/1024:.1f} KB)')
+    else:
+        print('  Blender scene: (not generated)')
+
+    if result.scene_graph_json_path:
+        p = Path(result.scene_graph_json_path)
+        sz = p.stat().st_size if p.exists() else 0
+        print(f'  Scene graph:   {p} ({sz/1024:.1f} KB)')
+    else:
+        print('  Scene graph:   (not generated)')
+
+    # ── Summary ──
+    n_traj = sum(1 for o in result.objects if o.trajectory_4d is not None)
+    n_mesh = sum(1 for o in result.objects if o.mesh_3d is not None)
+    n_export = sum(1 for p in [result.animated_gltf_path, result.usd_path,
+                                result.blend_path, result.scene_graph_json_path] if p)
+    print()
+    print(f'  Summary: {n_mesh}/{len(result.objects)} objects with mesh, '
+          f'{n_traj} with 4D trajectory, {n_export}/4 exports')
+    print(f'\\nVideo 4D test DONE in {elapsed:.1f}s')
+else:
+    print()
+    print('SKIPPED: test_input.mp4 not found (needed for 4D test)')
 
 print()
 print('='*60)
