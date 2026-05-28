@@ -15,25 +15,6 @@ logger = logging.getLogger(__name__)
 _gs_pipeline = None
 
 
-def _get_mock_splat_data(n_points: int = 1000) -> dict:
-    """Generate mock Gaussian splat data for testing."""
-    rng = np.random.RandomState(88)
-    return {
-        "means": rng.uniform(-5, 5, (n_points, 3)).tolist(),
-        "quats": _normalize_quats(rng.randn(n_points, 4)).tolist(),
-        "scales": np.exp(rng.uniform(-2, 0, (n_points, 3))).tolist(),
-        "opacities": (1 / (1 + np.exp(-rng.uniform(-2, 2, n_points)))).tolist(),
-        "sh_coeffs": rng.uniform(-0.5, 0.5, (n_points, 3)).tolist(),  # SH degree 0
-    }
-
-
-def _normalize_quats(q: np.ndarray) -> np.ndarray:
-    """Normalize quaternions."""
-    norms = np.linalg.norm(q, axis=1, keepdims=True)
-    norms = np.maximum(norms, 1e-8)
-    return q / norms
-
-
 class GaussianSplatPipeline:
     """3D Gaussian Splatting training and export pipeline."""
 
@@ -45,8 +26,8 @@ class GaussianSplatPipeline:
 
     def _check_available(self):
         """Check if gsplat/nerfstudio is available."""
-        if settings.mock_mode or not settings.gaussian_splatting:
-            logger.info("3DGS: disabled or mock mode")
+        if not settings.gaussian_splatting:
+            logger.info("3DGS: disabled")
             self.available = False
             return
 
@@ -72,7 +53,7 @@ class GaussianSplatPipeline:
             splat_data dict or None
         """
         if not settings.gaussian_splatting or not getattr(self, "available", False):
-            return _get_mock_splat_data()
+            return None
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -80,7 +61,7 @@ class GaussianSplatPipeline:
             return self._train_gsplat(frames_dir, output_dir, iterations)
         except Exception as e:
             logger.error(f"3DGS training failed: {e}")
-            return _get_mock_splat_data()
+            return None
 
     def _train_gsplat(self, frames_dir: Path, output_dir: Path,
                       iterations: int) -> dict:
@@ -96,7 +77,7 @@ class GaussianSplatPipeline:
         frame_paths = sorted(frames_dir.glob("*.png")) + sorted(frames_dir.glob("*.jpg"))
         n_frames = len(frame_paths)
         if n_frames == 0:
-            return _get_mock_splat_data()
+            return None
 
         # Load first frame to get dimensions
         from PIL import Image as PILImage

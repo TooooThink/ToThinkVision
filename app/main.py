@@ -324,7 +324,6 @@ async def health():
     return {
         "status": "ok",
         "version": "2.0.0",
-        "mock_mode": settings.mock_mode,
         "models": {
             "segmentation": settings.segmentation_model,
             "detection": settings.detection_model,

@@ -13,14 +13,6 @@ from app.utils.geometry import check_collision, compute_relative_position, compu
 from app.schemas import BBox2D, ObjectType, StructuredObject
 
 
-@pytest.fixture(autouse=True)
-def mock_mode():
-    """Force mock mode for all tests."""
-    os.environ["MOCK_MODE"] = "true"
-    yield
-    os.environ.pop("MOCK_MODE", None)
-
-
 class TestObjectTracker:
     def test_iou_perfect_overlap(self):
         bbox = [0.0, 0.0, 100.0, 100.0]
@@ -140,10 +132,10 @@ class TestColor:
 
 
 class TestPipelineIntegration:
-    """Integration tests for the full pipeline in mock mode."""
+    """Integration tests for the full pipeline (requires real models)."""
 
-    def test_process_image_mock(self):
-        """Test that process_file runs without errors in mock mode on a synthetic image."""
+    def test_process_image(self):
+        """Test that process_file runs on a synthetic image (requires real models)."""
         os.makedirs("/tmp/ttv_test", exist_ok=True)
         # Create a simple test image
         img = np.zeros((200, 300, 3), dtype=np.uint8)
@@ -158,20 +150,3 @@ class TestPipelineIntegration:
         assert result.source_type == "image"
         assert result.frame_count == 1
         assert len(result.objects) > 0
-
-    def test_process_image_mock_generates_objects(self):
-        """Verify mock pipeline produces objects with all required fields."""
-        os.makedirs("/tmp/ttv_test", exist_ok=True)
-        img = np.ones((100, 100, 3), dtype=np.uint8) * 128
-        img_path = Path("/tmp/ttv_test/test_simple.png")
-        Image.fromarray(img).save(str(img_path))
-
-        from app.pipeline import process_file
-        result = process_file(img_path, mode="general")
-        assert len(result.objects) > 0
-        obj = result.objects[0]
-        assert obj.id is not None
-        assert obj.bbox is not None
-        assert obj.bbox.w > 0
-        assert obj.bbox.h > 0
-        assert obj.dominant_color is not None or obj.depth_value is not None

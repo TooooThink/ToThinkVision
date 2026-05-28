@@ -13,23 +13,11 @@ logger = logging.getLogger(__name__)
 _depth_model = None
 
 
-def _get_mock_depth(img: np.ndarray) -> np.ndarray:
-    """Generate mock depth map for testing. Simulates simple perspective depth."""
-    h, w = img.shape[:2]
-    y, x = np.mgrid[0:h, 0:w]
-    # Simple gradient: bottom = closer (lower depth value), top = farther
-    depth = (y / h).astype(np.float32) * 255.0
-    return depth
-
-
 def _get_depth_model():
     """Lazy-load Depth Anything model."""
     global _depth_model
     if _depth_model is not None:
         return _depth_model
-    if settings.mock_mode:
-        logger.info("Using mock depth model (MOCK_MODE=true)")
-        return "mock"
     try:
         import torch
         from transformers import AutoImageProcessor, AutoModelForDepthEstimation
@@ -38,41 +26,35 @@ def _get_depth_model():
         processor = AutoImageProcessor.from_pretrained(model_name, cache_dir=settings.model_cache_dir)
         model = AutoModelForDepthEstimation.from_pretrained(model_name, cache_dir=settings.model_cache_dir)
         model.to(device=settings.device)
-        return {"processor": processor, "model": model}
+        _depth_model = {"processor": processor, "model": model}
+        return _depth_model
     except ImportError:
-        logger.warning("transformers not installed, falling back to mock mode")
-        return "mock"
+        raise RuntimeError("transformers not installed. Install with: pip install transformers")
 
 
 def estimate_depth(img: np.ndarray) -> np.ndarray:
     """Estimate depth map. Returns normalized depth array (same shape as image, single channel)."""
     depth_model = _get_depth_model()
-    if depth_model == "mock":
-        return _get_mock_depth(img)
 
-    try:
-        import torch
-        from PIL import Image as PILImage
+    import torch
+    from PIL import Image as PILImage
 
-        pil_img = PILImage.fromarray(img)
-        inputs = depth_model["processor"](images=pil_img, return_tensors="pt").to(settings.device)
-        with torch.no_grad():
-            outputs = depth_model["model"](**inputs)
-        predicted_depth = outputs.predicted_depth
-        # Interpolate to original size
-        prediction = torch.nn.functional.interpolate(
-            predicted_depth.unsqueeze(1),
-            size=img.shape[:2],
-            mode="bicubic",
-            align_corners=False,
-        )
-        output = prediction.squeeze().cpu().numpy()
-        # Normalize to 0-255
-        output = (output - output.min()) / (output.max() - output.min()) * 255.0
-        return output.astype(np.float32)
-    except Exception as e:
-        logger.error(f"Depth estimation failed: {e}, using mock fallback")
-        return _get_mock_depth(img)
+    pil_img = PILImage.fromarray(img)
+    inputs = depth_model["processor"](images=pil_img, return_tensors="pt").to(settings.device)
+    with torch.no_grad():
+        outputs = depth_model["model"](**inputs)
+    predicted_depth = outputs.predicted_depth
+    # Interpolate to original size
+    prediction = torch.nn.functional.interpolate(
+        predicted_depth.unsqueeze(1),
+        size=img.shape[:2],
+        mode="bicubic",
+        align_corners=False,
+    )
+    output = prediction.squeeze().cpu().numpy()
+    # Normalize to 0-255
+    output = (output - output.min()) / (output.max() - output.min()) * 255.0
+    return output.astype(np.float32)
 
 
 def get_depth_at_bbox(depth_map: np.ndarray, bbox: list[float]) -> float:

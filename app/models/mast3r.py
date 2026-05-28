@@ -19,38 +19,6 @@ logger = logging.getLogger(__name__)
 _reconstructor = None
 
 
-def _get_mock_pointcloud(frames_dir: Path, num_frames: int = 10) -> tuple[dict, list[dict]]:
-    """Generate mock point cloud and camera poses for testing."""
-    rng = np.random.RandomState(77)
-    h, w = 480, 640
-    K = estimate_intrinsics(w, h)
-
-    n_points = 5000
-    points = rng.uniform(-5, 5, (n_points, 3))
-    points[:, 2] = np.abs(points[:, 2]) + 1
-    colors = (rng.uniform(0, 1, (n_points, 3)) * 255).astype(np.uint8)
-
-    poses = []
-    for i in range(num_frames):
-        z = -i * 0.5 - 2
-        position = (0.0, 0.0, z)
-        R = np.eye(3)
-        T = np.eye(4)
-        T[:3, :3] = R
-        T[:3, 3] = position
-
-        poses.append({
-            "frame_idx": i,
-            "intrinsics": K.tolist(),
-            "extrinsics": T.tolist(),
-            "position": position,
-            "rotation": rt_matrix_to_quaternion(R),
-        })
-
-    pointcloud = {"points": points.tolist(), "colors": colors.tolist()}
-    return pointcloud, poses
-
-
 class VGGTReconstructor:
     """Wrapper for VGGT 3D scene reconstruction from video frames.
 
@@ -71,10 +39,6 @@ class VGGTReconstructor:
 
     def _init_model(self):
         """Load VGGT model, fall back to MASt3R."""
-        if settings.mock_mode:
-            logger.info("VGGT: using mock mode")
-            return
-
         # Try VGGT first
         try:
             import torch
@@ -121,17 +85,18 @@ class VGGTReconstructor:
             (pointcloud_dict, camera_poses_list)
         """
         if self.model is None and self._mast3r_model is None:
-            if sample_interval is None:
-                sample_interval = settings.mast3r_sample_interval
-            return _get_mock_pointcloud(frames_dir,
-                num_frames=len(list(frames_dir.glob("*.png"))) // max(1, sample_interval))
+            raise RuntimeError(
+                "Neither VGGT nor MASt3R is available. "
+                "Install VGGT: pip install transformers (with meta/VGGT weights) "
+                "or MASt3R: git clone --recursive https://github.com/naver/mast3r.git"
+            )
 
         if self._backend == "vggt":
             return self._reconstruct_vggt(frames_dir, sample_interval)
         elif self._backend == "mast3r":
             return self._reconstruct_mast3r(frames_dir, sample_interval)
         else:
-            return _get_mock_pointcloud(frames_dir)
+            raise RuntimeError(f"Unknown backend: {self._backend}")
 
     def _reconstruct_vggt(self, frames_dir: Path, sample_interval: int | None) -> tuple[dict, list[dict]]:
         """VGGT 3D reconstruction — feed-forward transformer, ~0.2s."""
@@ -142,8 +107,7 @@ class VGGTReconstructor:
         sampled_paths = frame_paths[::sample_interval]
 
         if len(sampled_paths) < 2:
-            logger.warning("Not enough frames for VGGT reconstruction (< 2 after sampling)")
-            return _get_mock_pointcloud(frames_dir)
+            raise RuntimeError("Not enough frames for VGGT reconstruction (< 2 after sampling)")
 
         try:
             from PIL import Image as PILImage
@@ -172,7 +136,7 @@ class VGGTReconstructor:
                     return self._reconstruct_mast3r(frames_dir, sample_interval)
                 except Exception:
                     self._backend = old_backend
-            return _get_mock_pointcloud(frames_dir)
+            raise RuntimeError(f"VGGT reconstruction failed: {e}")
 
     def _extract_vggt_pointcloud(self, outputs, images: list) -> tuple[np.ndarray, np.ndarray]:
         """Extract point cloud from VGGT outputs."""
@@ -263,9 +227,7 @@ class VGGTReconstructor:
                 "rotation": tuple(float(x) for x in rotation),
             })
 
-        return poses if poses else _get_mock_pointcloud(
-            Path("."), num_frames=len(frame_paths)
-        )[1]
+        return poses
 
     # ── MASt3R fallback methods ──────────────────────────────────
 
@@ -280,8 +242,7 @@ class VGGTReconstructor:
         sampled_paths = frame_paths[::sample_interval]
 
         if len(sampled_paths) < 2:
-            logger.warning("Not enough frames for MASt3R reconstruction (< 2 after sampling)")
-            return _get_mock_pointcloud(frames_dir)
+            raise RuntimeError("Not enough frames for MASt3R reconstruction (< 2 after sampling)")
 
         # Load images
         images = load_images([str(p) for p in sampled_paths], size=512)
@@ -385,7 +346,7 @@ class VGGTReconstructor:
                 "rotation": tuple(float(x) for x in rotation),
             })
 
-        return poses if poses else _get_mock_pointcloud(Path("."), num_frames=len(images))[1]
+        return poses
 
     def _extract_pointcloud(self, output: dict, images: list) -> tuple[np.ndarray, np.ndarray]:
         import torch

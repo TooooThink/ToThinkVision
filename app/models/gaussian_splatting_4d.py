@@ -156,11 +156,9 @@ class GaussianSplat4DPipeline:
         self.config = config or PipelineConfig()
 
         if not _HAS_TORCH:
-            logger.warning("PyTorch not available, 4DGS will use mock mode")
-            self.available = False
+            raise RuntimeError("PyTorch required for 4D Gaussian Splatting")
         elif not torch.cuda.is_available():
-            logger.warning("CUDA not available, 4DGS will use mock mode")
-            self.available = False
+            raise RuntimeError("CUDA required for 4D Gaussian Splatting")
         else:
             self.available = True
 
@@ -185,8 +183,7 @@ class GaussianSplat4DPipeline:
             Dict mapping object_id → GaussianSplat4D
         """
         if not self.available:
-            logger.info("4DGS not available, returning mock data")
-            return self._mock_result()
+            raise RuntimeError("4DGS not available (requires PyTorch + CUDA)")
 
         from PIL import Image
 
@@ -343,22 +340,6 @@ class GaussianSplat4DPipeline:
         # L1 loss
         loss = F.l1_loss(rendered, target)
         return loss
-
-    def _mock_result(self) -> dict[str, GaussianSplat4D]:
-        """Return mock 4DGS result when GPU/PyTorch not available."""
-        n = 1000
-        return {
-            "scene": GaussianSplat4D(
-                means=np.random.randn(n, 3).tolist(),
-                quats=np.random.randn(n, 4).tolist(),
-                scales=np.random.rand(n, 3).tolist(),
-                opacities=np.random.rand(n).tolist(),
-                sh_coeffs=np.random.rand(n, 3).tolist(),
-                temporal_coeffs=[],
-                time_range=(0.0, 1.0),
-                num_gaussians=n,
-            ),
-        }
 
     def export(self, gaussians_4d: dict[str, GaussianSplat4D], output_path: Path):
         """Export 4D Gaussian parameters."""

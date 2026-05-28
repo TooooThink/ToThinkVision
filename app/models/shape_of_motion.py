@@ -35,7 +35,7 @@ class ShapeOfMotionPipeline:
     This replaces the separate depth + tracking + ICP pipeline with a
     single end-to-end model that produces temporally consistent 4D output.
 
-    Falls back to mock mode if not available.
+    Falls back to error if not available.
     """
 
     def __init__(
@@ -114,7 +114,11 @@ class ShapeOfMotionPipeline:
                 - "output_dir": output directory path
         """
         if not self.available:
-            return self._mock_reconstruct_4d(video_path, num_frames)
+            raise RuntimeError(
+                "Shape of Motion not available. Clone from "
+                "https://github.com/vye16/shape-of-motion/ "
+                "and set SHAPE_OF_MOTION_PATH env var, or place under models/shape-of-motion/"
+            )
 
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="som_"))
@@ -125,7 +129,7 @@ class ShapeOfMotionPipeline:
         # Run Shape of Motion inference
         result = self._run_inference(video_path, output_dir, num_frames, resolution)
         if result is None:
-            return self._mock_reconstruct_4d(video_path, num_frames)
+            raise RuntimeError("Shape of Motion inference failed")
 
         # Parse outputs
         per_frame_pcs = self._load_per_frame_pointclouds(output_dir)
@@ -437,80 +441,6 @@ class ShapeOfMotionPipeline:
             return "rigid"
         else:
             return "deformable"
-
-    def _mock_reconstruct_4d(
-        self, video_path: Path | str, num_frames: int | None
-    ) -> dict[str, Any]:
-        """Generate mock 4D reconstruction results."""
-        logger.info("Shape of Motion mock mode: generating placeholder results")
-
-        T = num_frames or 30
-        rng = np.random.RandomState(99)
-        w, h = 640, 480
-        K = estimate_intrinsics(w, h)
-
-        # Generate per-frame point clouds with temporal coherence
-        per_frame_pcs = []
-        base_points = rng.uniform(-3, 3, (2000, 3))
-        base_colors = (rng.uniform(0, 1, (2000, 3)) * 255).astype(np.uint8)
-
-        for t in range(T):
-            # Add small temporal deformation
-            deformation = rng.randn(2000, 3) * 0.02 * t
-            # Add object-like motion: first 500 points move right
-            deformation[:500, 0] += t * 0.05
-            pts = base_points + deformation
-
-            per_frame_pcs.append({
-                "points": pts.tolist(),
-                "colors": base_colors.tolist(),
-            })
-
-        # Generate camera poses (slow orbit)
-        camera_poses = []
-        for i in range(T):
-            angle = i * 0.05
-            cx = np.sin(angle) * 4
-            cz = np.cos(angle) * 4
-            T_mat = np.eye(4)
-            forward = np.array([-cx, 0, -cz])
-            forward /= np.linalg.norm(forward)
-            right = np.cross(np.array([0, 1, 0]), forward)
-            if np.linalg.norm(right) > 1e-6:
-                right /= np.linalg.norm(right)
-            up = np.cross(forward, right)
-            T_mat[:3, 0] = right
-            T_mat[:3, 1] = up
-            T_mat[:3, 2] = forward
-            T_mat[:3, 3] = [cx, 0, cz]
-
-            R = T_mat[:3, :3]
-            position = rt_matrix_to_position(R, T_mat[:3, 3])
-            rotation = rt_matrix_to_quaternion(R)
-
-            camera_poses.append({
-                "frame_idx": i,
-                "intrinsics": K.tolist(),
-                "extrinsics": T_mat.tolist(),
-                "position": tuple(float(x) for x in position),
-                "rotation": tuple(float(x) for x in rotation),
-            })
-
-        # Mock deformation field
-        deformation_field = {
-            "type": "mlp_deformation",
-            "num_control_points": 100,
-            "time_range": [0.0, T / 30.0],
-        }
-
-        return {
-            "per_frame_pointclouds": per_frame_pcs,
-            "per_frame_meshes": [],
-            "camera_poses": camera_poses,
-            "deformation_field": deformation_field,
-            "transform_json": None,
-            "output_dir": Path(tempfile.mkdtemp(prefix="som_mock_")),
-        }
 
 
 # Global instance

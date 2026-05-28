@@ -4,8 +4,8 @@ For objects flagged as partially visible, this module uses LaMa
 (large mask inpainting) to generate the missing regions of the object.
 
 LaMa is lightweight (~300MB), fast (<100ms on GPU), and runs locally
-without API calls. When LaMa weights are unavailable or mock_mode is
-enabled, returns the input unchanged.
+without API calls. When LaMa weights are unavailable,
+returns the input unchanged.
 """
 
 from __future__ import annotations
@@ -13,8 +13,6 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +30,6 @@ class Completion2D:
 
     def _init_model(self):
         """Load LaMa model."""
-        if settings.mock_mode:
-            logger.info("Completion2D: using mock mode")
-            return
-
         # Try loading LaMa from HuggingFace transformers
         try:
             import torch

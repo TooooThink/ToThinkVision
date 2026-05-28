@@ -27,30 +27,6 @@ DETECTION_PROMPTS = {
 _detector = None
 
 
-def _get_mock_detections(img: np.ndarray, mode: str = "general") -> list[dict]:
-    """Generate mock detections for testing."""
-    h, w = img.shape[:2]
-    rng = np.random.RandomState(99)
-    prompts = DETECTION_PROMPTS.get(mode, DETECTION_PROMPTS["general"])
-    labels = [l.strip() for l in prompts.split(" . ") if l.strip()]
-
-    detections = []
-    num_det = min(len(labels), 6)
-    for i in range(num_det):
-        max_bw = max(50, w // 3)
-        max_bh = max(50, h // 3)
-        bw = rng.randint(20, min(180, max_bw))
-        bh = rng.randint(20, min(180, max_bh))
-        x = rng.randint(0, max(10, w - bw - 10))
-        y = rng.randint(0, max(10, h - bh - 10))
-        detections.append({
-            "bbox": [float(x), float(y), float(bw), float(bh)],
-            "label": labels[i % len(labels)],
-            "confidence": 0.85 - i * 0.07,
-        })
-    return detections
-
-
 class GroundingDINO:
     """Wrapper for GroundingDINO open-vocabulary detection.
 
@@ -68,10 +44,6 @@ class GroundingDINO:
 
     def _init_model(self):
         """Load GroundingDINO detector."""
-        if settings.mock_mode:
-            logger.info("GroundingDINO: using mock mode")
-            return
-
         # Try HuggingFace transformers — uses HF_HOME env var for cache
         try:
             import torch
@@ -155,7 +127,7 @@ class GroundingDINO:
             list of {bbox, label, confidence} — bbox as [x, y, w, h]
         """
         if self.model is None:
-            raise RuntimeError("GroundingDINO model not loaded. Set MOCK_MODE=true to allow mock detection.")
+            raise RuntimeError("GroundingDINO model not loaded")
 
         prompt = custom_prompt or DETECTION_PROMPTS.get(mode, DETECTION_PROMPTS["general"])
 

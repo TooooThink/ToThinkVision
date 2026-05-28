@@ -14,15 +14,6 @@ logger = logging.getLogger(__name__)
 _depth_model = None
 
 
-def _get_mock_depth(img: np.ndarray) -> np.ndarray:
-    """Generate mock metric depth map for testing."""
-    h, w = img.shape[:2]
-    y, x = np.mgrid[0:h, 0:w]
-    # Simulated perspective: bottom = closer (0.5m), top = farther (20m)
-    depth = 0.5 + (y / h) * 19.5
-    return depth.astype(np.float32)
-
-
 class DepthPro:
     """Wrapper for Apple Depth Pro metric depth estimation.
 
@@ -40,10 +31,6 @@ class DepthPro:
 
     def _init_model(self):
         """Load Depth Pro model."""
-        if settings.mock_mode:
-            logger.info("Depth Pro: using mock mode")
-            return
-
         # Try official Apple package first (checkpoint already downloaded)
         try:
             import depth_pro
@@ -99,7 +86,7 @@ class DepthPro:
             depth_map: (H, W) depth in meters
         """
         if self.model is None:
-            raise RuntimeError("Depth Pro model not loaded. Set MOCK_MODE=true to allow mock depth.")
+            raise RuntimeError("Depth Pro model not loaded")
 
         try:
             from PIL import Image as PILImage

@@ -7,8 +7,8 @@
 #   3. Spann3R      (3DV 2025, repo clone + DUSt3R submodules)
 #   4. Shape of Motion (ICCV 2025, repo clone + weights)
 #
-# All 4 models have mock fallback — you only need to install them if you
-# want real inference. Without them, the pipeline still runs (mock mode).
+# All 4 models are required for full inference. The pipeline raises
+# RuntimeError if a model is needed but not installed.
 
 set -e
 
@@ -134,8 +134,8 @@ echo "  ToThinkVision v2.1 — 4D Model Installer"
 echo "=========================================="
 echo ""
 echo "This installs the 4 advanced models added in v2.1."
-echo "All 4 have automatic mock fallback — you can skip any of them"
-echo "and the pipeline will still run (using mock data for those stages)."
+echo "All 4 are required for full 4D pipeline. If a model is missing,"
+echo "the pipeline will raise RuntimeError when that stage is reached."
 echo ""
 echo "Select models to install:"
 echo ""
@@ -315,7 +315,7 @@ if not ckpt_path:
     print('    # scp 到集群:')
     print('    scp $weights_dir/*.pth your_cluster:$weights_dir/')
     print()
-    print('  CoTracker3 will use mock mode at runtime (pipeline still works).')
+    print('  CoTracker3 is required but not installed — pipeline will raise at runtime.')
     sys.exit(0)
 
 # Step 3: Load model (hubconf.py will find weights in torch.hub cache)
@@ -332,7 +332,7 @@ except Exception as e:
     print('    - requirements.txt 依赖是否装全:')
     print('      pip install -r $repo_dest/requirements.txt')
     print()
-    print('  CoTracker3 will use mock mode at runtime (pipeline still works).')
+    print('  CoTracker3 is required but not installed — pipeline will raise at runtime.')
 " 2>&1 || true
 
     echo ""

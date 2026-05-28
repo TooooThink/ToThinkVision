@@ -34,7 +34,7 @@ class Spann3RReconstructor:
     - Better camera pose estimation for long sequences
     - NeRF/3DGS-compatible output (transform.json)
 
-    Falls back to mock mode if not available.
+    Falls back to error if not available.
     """
 
     def __init__(
@@ -104,7 +104,10 @@ class Spann3RReconstructor:
             (pointcloud_dict, camera_poses_list)
         """
         if not self.available:
-            return self._mock_reconstruct(frames_dir, sample_interval)
+            raise RuntimeError(
+                "Spann3R not available. Clone from https://github.com/HengyiWang/Spann3R "
+                "and set SPANN3R_PATH env var, or place under models/Spann3R/"
+            )
 
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="spann3r_"))
@@ -123,8 +126,7 @@ class Spann3RReconstructor:
         sampled_paths = frame_paths[::sample_interval]
 
         if len(sampled_paths) < 2:
-            logger.warning("Not enough frames for Spann3R (< 2 after sampling)")
-            return self._mock_reconstruct(frames_dir, sample_interval)
+            raise RuntimeError("Not enough frames for Spann3R (< 2 after sampling)")
 
         # Symlink sampled frames
         for i, fp in enumerate(sampled_paths):
@@ -138,8 +140,7 @@ class Spann3RReconstructor:
             # Try alternative entry point
             demo_script = self.repo_path / "run.py"
             if not demo_script.exists():
-                logger.error("Spann3R demo script not found")
-                return self._mock_reconstruct(frames_dir, sample_interval)
+                raise RuntimeError("Spann3R demo script not found")
 
         cmd = [
             "python", str(demo_script),
@@ -161,22 +162,21 @@ class Spann3RReconstructor:
             )
 
             if result.returncode != 0:
-                logger.error("Spann3R failed: %s", result.stderr)
-                return self._mock_reconstruct(frames_dir, sample_interval)
+                raise RuntimeError(f"Spann3R failed: {result.stderr}")
 
         except subprocess.TimeoutExpired:
-            logger.error("Spann3R timed out")
-            return self._mock_reconstruct(frames_dir, sample_interval)
+            raise RuntimeError("Spann3R timed out")
+        except RuntimeError:
+            raise
         except Exception as e:
-            logger.error("Spann3R error: %s", e)
-            return self._mock_reconstruct(frames_dir, sample_interval)
+            raise RuntimeError(f"Spann3R error: {e}")
 
         # Parse outputs
         pointcloud = self._load_pointcloud(output_dir)
         camera_poses = self._load_camera_poses(output_dir, sample_interval)
 
         if pointcloud is None or camera_poses is None:
-            return self._mock_reconstruct(frames_dir, sample_interval)
+            raise RuntimeError("Spann3R produced no valid output")
 
         return pointcloud, camera_poses
 
@@ -450,60 +450,6 @@ class Spann3RReconstructor:
                     "rotation": tuple(float(x) for x in rotation),
                 })
         return poses
-
-    def _mock_reconstruct(
-        self, frames_dir: Path, sample_interval: int
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        """Generate mock Spann3R results."""
-        logger.info("Spann3R mock mode: generating placeholder results")
-
-        frame_paths = sorted(
-            list(Path(frames_dir).glob("*.jpg"))
-            + list(Path(frames_dir).glob("*.png"))
-        )
-        num_frames = max(1, len(frame_paths) // max(1, sample_interval))
-
-        rng = np.random.RandomState(88)
-        n_points = 5000
-        points = rng.uniform(-5, 5, (n_points, 3))
-        points[:, 2] = np.abs(points[:, 2]) + 1
-        colors = (rng.uniform(0, 1, (n_points, 3)) * 255).astype(np.uint8)
-
-        poses = []
-        w, h = 640, 480
-        K = estimate_intrinsics(w, h)
-
-        for i in range(num_frames):
-            angle = i * 0.1
-            cx = np.sin(angle) * 3
-            cz = np.cos(angle) * 3
-            T = np.eye(4)
-            # Camera looking at origin
-            forward = np.array([-cx, 0, -cz])
-            forward = forward / np.linalg.norm(forward)
-            right = np.cross(np.array([0, 1, 0]), forward)
-            if np.linalg.norm(right) > 1e-6:
-                right = right / np.linalg.norm(right)
-            up = np.cross(forward, right)
-            T[:3, 0] = right
-            T[:3, 1] = up
-            T[:3, 2] = forward
-            T[:3, 3] = [cx, 0, cz]
-
-            R = T[:3, :3]
-            position = rt_matrix_to_position(R, T[:3, 3])
-            rotation = rt_matrix_to_quaternion(R)
-
-            poses.append({
-                "frame_idx": i * sample_interval,
-                "intrinsics": K.tolist(),
-                "extrinsics": T.tolist(),
-                "position": tuple(float(x) for x in position),
-                "rotation": tuple(float(x) for x in rotation),
-            })
-
-        pointcloud = {"points": points.tolist(), "colors": colors.tolist()}
-        return pointcloud, poses
 
 
 # Global instance

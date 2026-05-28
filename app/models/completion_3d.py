@@ -16,8 +16,6 @@ import logging
 
 import numpy as np
 
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 _instance = None
@@ -34,10 +32,6 @@ class Completion3D:
 
     def _init_model(self):
         """Try loading 3D completion models."""
-        if settings.mock_mode:
-            logger.info("Completion3D: using mock mode")
-            return
-
         # Try PVD (Point Voxel Diffusion)
         try:
             from pvd.models.pvd import PVD

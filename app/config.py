@@ -24,13 +24,12 @@ class Settings(BaseSettings):
     max_video_frames: int = 300
     frame_sample_interval: float = 0.0
     device: str = "cuda"
-    mock_mode: bool = os.environ.get("MOCK_MODE", "false").lower() == "true"
 
     # GPU
     gpu_memory_gb: int = int(os.environ.get("TTV_GPU_MEMORY_GB", "24"))
     batch_size: int = 4
 
-    # Model selection (all enabled by default, mock fallback if weights missing)
+    # Model selection (all enabled by default)
     segmentation_model: str = "sam3"
     detection_model: str = "auto"  # omniparser for ui mode, grounding_dino for others
     tracking_model: str = "botsort"

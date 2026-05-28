@@ -23,82 +23,49 @@ DETECTION_PROMPTS = {
 _detector = None
 
 
-def _get_mock_detections(img: np.ndarray, mode: str = "general") -> list[dict]:
-    """Generate mock detections for testing."""
-    h, w = img.shape[:2]
-    rng = np.random.RandomState(99)
-    prompts = DETECTION_PROMPTS.get(mode, DETECTION_PROMPTS["general"])
-    labels = [l.strip() for l in prompts.split(" . ") if l.strip()]
-
-    detections = []
-    num_det = min(len(labels), 6)
-    for i in range(num_det):
-        max_bw = max(50, w // 3)
-        max_bh = max(50, h // 3)
-        bw = rng.randint(20, min(180, max_bw))
-        bh = rng.randint(20, min(180, max_bh))
-        x = rng.randint(0, w - bw - 10)
-        y = rng.randint(0, h - bh - 10)
-        detections.append({
-            "bbox": [float(x), float(y), float(bw), float(bh)],
-            "label": labels[i % len(labels)],
-            "confidence": 0.8 - i * 0.08,
-        })
-    return detections
-
-
 def _get_detector():
     """Lazy-load Grounding DINO detector."""
     global _detector
     if _detector is not None:
         return _detector
-    if settings.mock_mode:
-        logger.info("Using mock detector (MOCK_MODE=true)")
-        return "mock"
     try:
         from groundingdino.util.inference import load_model, load_image, predict
         model_path = Path(settings.model_cache_dir) / "groundingdino_swint_ogc.pth"
         config_path = Path(settings.model_cache_dir) / "GroundingDINO_SwinT_OGC.py"
         if not model_path.exists():
-            logger.warning("Grounding DINO weights not found, falling back to mock mode")
-            return "mock"
+            raise RuntimeError(f"Grounding DINO weights not found at {model_path}")
         model = load_model(str(config_path), str(model_path))
         model.to(device=settings.device)
+        _detector = model
         return model
     except ImportError:
-        logger.warning("groundingdino-py not installed, falling back to mock mode")
-        return "mock"
+        raise RuntimeError("groundingdino-py not installed. Install with: pip install groundingdino-py")
 
 
 def detect_objects(img: np.ndarray, mode: str = "general") -> list[dict]:
     """Run open-vocabulary detection. Returns list of {bbox, label, confidence}."""
     detector = _get_detector()
-    if detector == "mock":
-        return _get_mock_detections(img, mode)
 
-    try:
-        from groundingdino.util.inference import load_image, predict
-        prompt = DETECTION_PROMPTS.get(mode, DETECTION_PROMPTS["general"])
-        image_transformed, _ = load_image(img)
-        boxes, logits, phrases = predict(
-            model=detector,
-            image=image_transformed,
-            caption=prompt,
-            box_threshold=settings.detection_threshold,
-            text_threshold=0.25,
-        )
-        h, w = img.shape[:2]
-        detections = []
-        for box, score, label in zip(boxes, logits, phrases):
-            cx, cy, bw, bh = box.tolist()
-            x = (cx - bw / 2) * w
-            y = (cy - bh / 2) * h
-            detections.append({
-                "bbox": [float(x), float(y), float(bw * w), float(bh * h)],
-                "label": label,
-                "confidence": float(score),
-            })
-        return detections
-    except Exception as e:
-        logger.error(f"Detection failed: {e}, using mock fallback")
-        return _get_mock_detections(img, mode)
+    from groundingdino.util.inference import load_image, predict
+    prompt = DETECTION_PROMPTS.get(mode, DETECTION_PROMPTS["general"])
+    image_transformed, _ = load_image(img)
+    boxes, logits, phrases = predict(
+        model=detector,
+        image=image_transformed,
+        caption=prompt,
+        box_threshold=settings.detection_threshold,
+        text_threshold=0.25,
+    )
+    h, w = img.shape[:2]
+    detections = []
+    for box, score, label in zip(boxes, logits, phrases):
+        cx, cy, bw, bh = box.tolist()
+        x = (cx - bw / 2) * w
+        y = (cy - bh / 2) * h
+        detections.append({
+            "bbox": [float(x), float(y), float(bw * w), float(bh * h)],
+            "label": label,
+            "confidence": float(score),
+        })
+    return detections
+

@@ -100,7 +100,7 @@ if [ -d "$CACHE_DIR" ]; then
     echo "Cache contents:"
     ls -lh "$CACHE_DIR" 2>/dev/null | head -20
 else
-    echo "WARNING: No model cache found. Models will fallback to mock."
+    echo "WARNING: No model cache found. Pipeline will raise if models are needed."
 fi
 
 # ── Run real inference ──
@@ -109,8 +109,6 @@ echo "── Starting real model inference ──"
 python -c "
 import time, os, sys
 from pathlib import Path
-
-os.environ['MOCK_MODE'] = 'false'
 
 from app.pipeline import process_file
 from app.schemas import PipelineConfig

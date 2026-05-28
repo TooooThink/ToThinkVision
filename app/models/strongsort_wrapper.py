@@ -9,8 +9,6 @@ import logging
 
 import numpy as np
 
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 _tracker = None
@@ -32,10 +30,6 @@ class BoTSORTTracker:
 
     def _init_model(self):
         """Initialize BoT-SORT tracker."""
-        if settings.mock_mode:
-            logger.info("BoT-SORT: using mock mode")
-            return
-
         # Try Ultralytics BoT-SORT first (most common install path)
         #
         # BOTSORT.__init__() API varies wildly across ultralytics versions:

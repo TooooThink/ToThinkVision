@@ -767,36 +767,9 @@ class TestCoTracker3:
 
     def test_init(self):
         from app.models.cotracker3 import CoTracker3Predictor
-        # Will be in mock mode (no CUDA on test env)
         predictor = CoTracker3Predictor(device="cpu")
         assert predictor.device == "cpu"
         assert predictor.mode == "offline"
-
-    def test_mock_track_video(self):
-        from app.models.cotracker3 import CoTracker3Predictor
-        predictor = CoTracker3Predictor(device="cpu")
-
-        frames = np.random.randint(0, 255, (10, 128, 128, 3), dtype=np.uint8)
-        result = predictor.track_video(frames, grid_size=10)
-
-        assert "tracks" in result
-        assert "visibility" in result
-        assert "query_points" in result
-        assert result["tracks"].shape[0] == 10  # T frames
-        assert result["tracks"].shape[1] == 100  # 10*10 grid
-        assert result["tracks"].shape[2] == 2  # (x, y)
-        assert result["num_points"] == 100
-
-    def test_mock_track_object_points(self):
-        from app.models.cotracker3 import CoTracker3Predictor
-        predictor = CoTracker3Predictor(device="cpu")
-
-        frames = np.random.randint(0, 255, (5, 64, 64, 3), dtype=np.uint8)
-        masks = {"obj_a": np.ones((5, 64, 64), dtype=bool)}
-
-        result = predictor.track_object_points(frames, masks, points_per_object=50)
-        assert "obj_a" in result
-        assert result["obj_a"]["tracks"].shape[0] == 5  # T frames
 
     def test_global_instance(self):
         from app.models.cotracker3 import get_cotracker
@@ -814,38 +787,11 @@ class TestObjectGS:
         assert pipe.device == "cuda"
         assert pipe.available is False  # No repo cloned
 
-    def test_mock_train(self):
+    def test_unavailable_raises(self):
         from app.models.object_gs import ObjectGSPipeline
         pipe = ObjectGSPipeline()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            frame_dir = Path(tmpdir) / "frames"
-            frame_dir.mkdir()
-            # Create dummy frames
-            for i in range(5):
-                (frame_dir / f"{i:06d}.jpg").touch()
-
-            result = pipe.train(frame_dir)
-
-            assert "scene_mesh" in result
-            assert "object_meshes" in result
-            assert len(result["object_meshes"]) == 3
-            assert result["scene_mesh"].exists()
-
-    def test_mock_mesh_content(self):
-        from app.models.object_gs import ObjectGSPipeline
-        pipe = ObjectGSPipeline()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            frame_dir = Path(tmpdir) / "frames"
-            frame_dir.mkdir()
-            (frame_dir / "000000.jpg").touch()
-
-            result = pipe.train(frame_dir)
-            scene_mesh = result["scene_mesh"]
-            content = scene_mesh.read_text()
-            assert "v " in content  # Has vertices
-            assert "f " in content  # Has faces
+        with pytest.raises(RuntimeError):
+            pipe.train(Path("/tmp/fake_frames"))
 
     def test_global_instance(self):
         from app.models.object_gs import get_objectgs_pipeline
@@ -863,42 +809,11 @@ class TestSpann3R:
         assert recon.device == "cuda"
         assert recon.available is False
 
-    def test_mock_reconstruct(self):
+    def test_unavailable_raises(self):
         from app.models.spann3r import Spann3RReconstructor
         recon = Spann3RReconstructor()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            frame_dir = Path(tmpdir) / "frames"
-            frame_dir.mkdir()
-            for i in range(20):
-                (frame_dir / f"{i:06d}.jpg").touch()
-
-            pc, poses = recon.reconstruct(frame_dir, sample_interval=5)
-
-            assert "points" in pc
-            assert "colors" in pc
-            assert len(pc["points"]) > 0
-            assert len(poses) > 0
-            assert "frame_idx" in poses[0]
-            assert "intrinsics" in poses[0]
-            assert "extrinsics" in poses[0]
-
-    def test_mock_poses_orbit(self):
-        from app.models.spann3r import Spann3RReconstructor
-        recon = Spann3RReconstructor()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            frame_dir = Path(tmpdir)
-            for i in range(30):
-                (frame_dir / f"{i:06d}.jpg").touch()
-
-            _, poses = recon.reconstruct(frame_dir, sample_interval=10)
-            # Should have camera poses in orbit pattern
-            assert len(poses) >= 2
-            # Check that poses have valid 4x4 extrinsics
-            for p in poses:
-                ext = np.array(p["extrinsics"])
-                assert ext.shape == (4, 4)
+        with pytest.raises(RuntimeError):
+            recon.reconstruct(Path("/tmp/fake_frames"), sample_interval=5)
 
     def test_nerfstudio_poses_parser(self):
         from app.models.spann3r import Spann3RReconstructor
@@ -933,51 +848,11 @@ class TestShapeOfMotion:
         assert pipe.device == "cuda"
         assert pipe.available is False
 
-    def test_mock_reconstruct_4d(self):
+    def test_unavailable_raises(self):
         from app.models.shape_of_motion import ShapeOfMotionPipeline
         pipe = ShapeOfMotionPipeline()
-
-        result = pipe.reconstruct_4d(
-            video_path=Path("/tmp/fake_video.mp4"),
-            num_frames=10,
-        )
-
-        assert "per_frame_pointclouds" in result
-        assert "camera_poses" in result
-        assert "deformation_field" in result
-        assert len(result["per_frame_pointclouds"]) == 10
-        assert len(result["camera_poses"]) == 10
-
-    def test_mock_temporal_coherence(self):
-        from app.models.shape_of_motion import ShapeOfMotionPipeline
-        pipe = ShapeOfMotionPipeline()
-
-        result = pipe.reconstruct_4d(
-            video_path=Path("/tmp/fake_video.mp4"),
-            num_frames=5,
-        )
-
-        pcs = result["per_frame_pointclouds"]
-        # Check that point clouds have consistent sizes
-        n_pts = len(pcs[0]["points"])
-        for pc in pcs:
-            assert len(pc["points"]) == n_pts
-            assert len(pc["colors"]) == n_pts
-
-    def test_mock_camera_poses_valid(self):
-        from app.models.shape_of_motion import ShapeOfMotionPipeline
-        pipe = ShapeOfMotionPipeline()
-
-        result = pipe.reconstruct_4d(
-            video_path=Path("/tmp/fake_video.mp4"),
-            num_frames=5,
-        )
-
-        for pose in result["camera_poses"]:
-            ext = np.array(pose["extrinsics"])
-            assert ext.shape == (4, 4)
-            assert "position" in pose
-            assert "rotation" in pose
+        with pytest.raises(RuntimeError):
+            pipe.reconstruct_4d(video_path=Path("/tmp/fake_video.mp4"), num_frames=10)
 
     def test_extract_object_trajectories(self):
         from app.models.shape_of_motion import ShapeOfMotionPipeline

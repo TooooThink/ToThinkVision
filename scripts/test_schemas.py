@@ -7,9 +7,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# Force mock mode
-os.environ["MOCK_MODE"] = "true"
-
 from app.schemas import (
     BBox2D, BBox3D, CameraPose, ExportFormat, GaussianSplatData,
     Interaction, InteractionType, ObjectRelation, ObjectType,

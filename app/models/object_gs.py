@@ -95,7 +95,10 @@ class ObjectGSPipeline:
                 - "gaussians": dict {object_id: GaussianSplatData}
         """
         if not self.available:
-            return self._mock_train(frame_dir, output_dir)
+            raise RuntimeError(
+                "ObjectGS not available. Clone from https://github.com/RuijieZhu94/ObjectGS "
+                "and set OBJECT_GS_PATH env var, or place under models/ObjectGS/"
+            )
 
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="objectgs_"))
@@ -126,8 +129,7 @@ class ObjectGSPipeline:
         script_path = self.repo_path / script
 
         if not script_path.exists():
-            logger.error("ObjectGS training script not found: %s", script_path)
-            return self._mock_train(frame_dir, output_dir)
+            raise RuntimeError(f"ObjectGS training script not found: {script_path}")
 
         try:
             result = subprocess.run(
@@ -139,12 +141,12 @@ class ObjectGSPipeline:
             )
 
             if result.returncode != 0:
-                logger.error("ObjectGS training failed: %s", result.stderr)
-                return self._mock_train(frame_dir, output_dir)
+                raise RuntimeError(f"ObjectGS training failed: {result.stderr}")
 
         except subprocess.TimeoutExpired:
-            logger.error("ObjectGS training timed out")
-            return self._mock_train(frame_dir, output_dir)
+            raise RuntimeError("ObjectGS training timed out")
+        except RuntimeError:
+            raise
 
         # Export per-object meshes
         object_meshes = self._export_object_meshes(output_dir)
@@ -227,41 +229,6 @@ class ObjectGSPipeline:
 
         except Exception:
             return None
-
-    def _mock_train(
-        self, frame_dir: Path, output_dir: Path | None
-    ) -> dict[str, Any]:
-        """Generate mock ObjectGS results."""
-        logger.info("ObjectGS mock mode: generating placeholder results")
-
-        if output_dir is None:
-            output_dir = Path(tempfile.mkdtemp(prefix="objectgs_mock_"))
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create mock mesh files
-        mock_meshes = {}
-        for i in range(3):
-            obj_id = f"object_{i:03d}"
-            mesh_path = output_dir / f"{obj_id}.obj"
-            with open(mesh_path, "w") as f:
-                f.write("# Mock ObjectGS mesh\n")
-                f.write("v 0 0 0\nv 1 0 0\nv 0 1 0\n")
-                f.write("f 1 2 3\n")
-            mock_meshes[obj_id] = mesh_path
-
-        scene_mesh = output_dir / "scene_mesh.obj"
-        with open(scene_mesh, "w") as f:
-            f.write("# Mock scene mesh\n")
-            f.write("v -1 -1 0\nv 1 -1 0\nv 1 1 0\nv -1 1 0\n")
-            f.write("f 1 2 3\nf 1 3 4\n")
-
-        return {
-            "scene_mesh": scene_mesh,
-            "object_meshes": mock_meshes,
-            "output_dir": output_dir,
-        }
 
 
 # Global instance

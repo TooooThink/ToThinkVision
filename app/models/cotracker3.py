@@ -50,12 +50,10 @@ class CoTracker3Predictor:
     def _init_model(self):
         """Load CoTracker3 model."""
         if not _HAS_COTRACKER:
-            logger.warning("PyTorch not available, CoTracker3 will use mock mode")
-            return
+            raise RuntimeError("PyTorch not available, CoTracker3 cannot be loaded")
 
         if not torch.cuda.is_available() and self.device == "cuda":
-            logger.warning("CUDA not available, CoTracker3 will use mock mode")
-            return
+            raise RuntimeError("CUDA not available, CoTracker3 requires GPU")
 
         try:
             import os
@@ -105,8 +103,7 @@ class CoTracker3Predictor:
 
             logger.info("CoTracker3 (%s mode) loaded successfully", self.mode)
         except Exception as e:
-            logger.warning("CoTracker3 load failed: %s, using mock mode", e)
-            self.model = None
+            raise RuntimeError(f"CoTracker3 load failed: {e}")
 
     def track_video(
         self,
@@ -128,7 +125,7 @@ class CoTracker3Predictor:
                 - "query_points": (N, 2) float array of initial query positions
         """
         if self.model is None:
-            return self._mock_track_video(frames, grid_size)
+            raise RuntimeError("CoTracker3 model not loaded")
 
         import torch
 
@@ -192,7 +189,7 @@ class CoTracker3Predictor:
             dict mapping object_id → {tracks, visibility}
         """
         if self.model is None:
-            return self._mock_track_objects(frames, object_masks, points_per_object)
+            raise RuntimeError("CoTracker3 model not loaded")
 
         import torch
 
@@ -258,56 +255,6 @@ class CoTracker3Predictor:
             "tracks": tracks,
             "visibility": visibility,
             "query_points": np.stack([query_x, query_y], axis=-1),
-        }
-
-    def _mock_track_video(
-        self, frames: np.ndarray | list, grid_size: int
-    ) -> dict[str, Any]:
-        """Generate mock tracking results."""
-        if isinstance(frames, list):
-            T = len(frames)
-            H, W = frames[0].shape[:2] if hasattr(frames[0], "shape") else (480, 640)
-        else:
-            T, H, W = frames.shape[:3]
-
-        N = grid_size * grid_size
-        rng = np.random.RandomState(42)
-
-        # Generate slowly drifting points
-        base_x = rng.uniform(0, W, N)
-        base_y = rng.uniform(0, H, N)
-        tracks = np.zeros((T, N, 2))
-        for t in range(T):
-            tracks[t, :, 0] = base_x + rng.randn(N) * t * 0.5
-            tracks[t, :, 1] = base_y + rng.randn(N) * t * 0.5
-
-        visibility = np.ones((T, N), dtype=bool)
-        query_points = tracks[0]
-
-        return {
-            "tracks": tracks,
-            "visibility": visibility,
-            "query_points": query_points,
-            "num_points": N,
-            "frame_width": W,
-            "frame_height": H,
-        }
-
-    def _mock_track_objects(
-        self, frames: np.ndarray, object_masks: Any, points_per_object: int
-    ) -> dict[str, Any]:
-        """Generate mock per-object tracking results."""
-        T = frames.shape[0] if frames.ndim == 4 else len(frames)
-        N = points_per_object
-        rng = np.random.RandomState(42)
-
-        tracks = rng.uniform(0, 100, (T, N, 2)).astype(np.float32)
-        visibility = np.ones((T, N), dtype=bool)
-
-        return {
-            "tracks": tracks,
-            "visibility": visibility,
-            "query_points": tracks[0],
         }
 
 

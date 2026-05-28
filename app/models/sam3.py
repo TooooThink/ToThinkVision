@@ -18,41 +18,6 @@ logger = logging.getLogger(__name__)
 _sam3_predictor = None
 
 
-def _get_mock_segmentation(img: np.ndarray, num_objects: int = 5) -> list[dict]:
-    """Generate mock segmentation with masks for testing."""
-    h, w = img.shape[:2]
-    rng = np.random.RandomState(42)
-    labels = ["object", "button", "text", "icon", "container", "person", "item"]
-    results = []
-    for i in range(num_objects):
-        max_bw = max(50, w // 3)
-        max_bh = max(50, h // 3)
-        bw = rng.randint(20, min(200, max_bw))
-        bh = rng.randint(20, min(200, max_bh))
-        x = rng.randint(0, max(10, w - bw - 10))
-        y = rng.randint(0, max(10, h - bh - 10))
-
-        # Create mask
-        mask = np.zeros((h, w), dtype=np.uint8)
-        # Polygon mask for more realistic shape
-        pts = np.array([
-            [x + rng.randint(0, 10), y + rng.randint(0, 10)],
-            [x + bw - rng.randint(0, 10), y + rng.randint(0, 10)],
-            [x + bw - rng.randint(0, 10), y + bh - rng.randint(0, 10)],
-            [x + rng.randint(0, 10), y + bh - rng.randint(0, 10)],
-        ], dtype=np.int32)
-        cv2 = __import__("cv2")
-        cv2.fillPoly(mask, [pts], 1)
-
-        results.append({
-            "mask": mask,
-            "bbox": [float(x), float(y), float(bw), float(bh)],
-            "label": labels[i % len(labels)],
-            "confidence": 0.9 - i * 0.05,
-        })
-    return results
-
-
 class SAM3Predictor:
     """Wrapper for SAM 3 image and video prediction.
 
@@ -69,10 +34,6 @@ class SAM3Predictor:
 
     def _init_model(self):
         """Load SAM 3 models."""
-        if settings.mock_mode:
-            logger.info("SAM 3: using mock mode")
-            return
-
         try:
             # Official SAM 3 API — unified entry point
             from sam3.model_builder import build_sam3_image_model
@@ -98,14 +59,11 @@ class SAM3Predictor:
 
                 # Verify the predictor has required internal components
                 if not hasattr(self.image_predictor, 'forward_image') or self.image_predictor.forward_image is None:
-                    logger.warning("SAM 3 interactive predictor missing forward_image component")
-                    self.image_predictor = None
-                    return
+                    raise RuntimeError("SAM 3 interactive predictor missing forward_image component")
 
                 logger.info("SAM 3 image predictor loaded")
             else:
-                logger.warning("SAM 3 model loaded but interactive predictor not available")
-                return
+                raise RuntimeError("SAM 3 model loaded but interactive predictor not available")
 
             # Try video predictor
             try:
@@ -123,8 +81,6 @@ class SAM3Predictor:
                 "SAM 3 is required but not installed. Install with: "
                 "pip install git+https://github.com/facebookresearch/sam3.git"
             )
-        except Exception as e:
-            raise RuntimeError(f"SAM 3 initialization failed: {e}")
 
     def predict(self, img: np.ndarray, text_prompt: str | None = None,
                 boxes: np.ndarray | None = None) -> list[dict]:
@@ -138,79 +94,65 @@ class SAM3Predictor:
         Returns:
             list of {mask, bbox, label, confidence}
         """
-        if self.image_predictor is None:
-            return _get_mock_segmentation(img)
+        self.image_predictor.set_image(img)
 
-        try:
-            self.image_predictor.set_image(img)
+        results = []
+        if boxes is not None and len(boxes) > 0:
+            # Segment from provided boxes
+            for i, box in enumerate(boxes):
+                # SAM 3 expects [x1, y1, x2, y2] format
+                masks, scores, _ = self.image_predictor.predict(
+                    box=box, multimask_output=True
+                )
+                best_idx = scores.argmax()
+                mask = masks[best_idx].astype(np.uint8)
+                results.append({
+                    "mask": mask,
+                    "bbox": box.tolist(),
+                    "label": f"object_{i}",
+                    "confidence": float(scores[best_idx]),
+                })
+        elif text_prompt:
+            # Use SAM 3 text-prompted segmentation
+            results = self._predict_with_text(img, text_prompt)
+        else:
+            # Automatic segmentation (predict without prompts = auto mode)
+            results = self._predict_automatic(img)
 
-            results = []
-            if boxes is not None and len(boxes) > 0:
-                # Segment from provided boxes
-                for i, box in enumerate(boxes):
-                    # SAM 3 expects [x1, y1, x2, y2] format
-                    masks, scores, _ = self.image_predictor.predict(
-                        box=box, multimask_output=True
-                    )
-                    best_idx = scores.argmax()
-                    mask = masks[best_idx].astype(np.uint8)
-                    results.append({
-                        "mask": mask,
-                        "bbox": box.tolist(),
-                        "label": f"object_{i}",
-                        "confidence": float(scores[best_idx]),
-                    })
-            elif text_prompt:
-                # Use SAM 3 text-prompted segmentation
-                results = self._predict_with_text(img, text_prompt)
-            else:
-                # Automatic segmentation (predict without prompts = auto mode)
-                results = self._predict_automatic(img)
-
-            return results
-        except Exception as e:
-            logger.error(f"SAM 3 prediction failed: {e}, using mock fallback")
-            return _get_mock_segmentation(img)
+        return results
 
     def _predict_with_text(self, img: np.ndarray, text_prompt: str) -> list[dict]:
         """Use SAM 3 text-prompted segmentation."""
-        try:
-            # SAM 3 supports text prompts via its forward pass
-            # The interactive predictor may have a text-based predict method
-            if hasattr(self.image_predictor, "predict_with_text"):
-                results = self.image_predictor.predict_with_text(text_prompt)
-                return results
-            # Fallback: use automatic segmentation
-            return self._predict_automatic(img)
-        except Exception:
-            return self._predict_automatic(img)
+        # SAM 3 supports text prompts via its forward pass
+        # The interactive predictor may have a text-based predict method
+        if hasattr(self.image_predictor, "predict_with_text"):
+            results = self.image_predictor.predict_with_text(text_prompt)
+            return results
+        # Fallback: use automatic segmentation
+        return self._predict_automatic(img)
 
     def _predict_automatic(self, img: np.ndarray) -> list[dict]:
         """Automatic segmentation using SAM 3 without prompts."""
-        try:
-            # Call predict with no prompts — returns all detected masks
-            masks, scores, _ = self.image_predictor.predict(
-                multimask_output=True,
-            )
-            results = []
-            for i, (mask, score) in enumerate(zip(masks, scores)):
-                if score < settings.segmentation_threshold:
-                    continue
-                mask_u8 = mask.astype(np.uint8)
-                ys, xs = np.where(mask_u8)
-                if len(xs) == 0:
-                    continue
-                bbox = [float(xs.min()), float(ys.min()), float(xs.max() - xs.min()), float(ys.max() - ys.min())]
-                results.append({
-                    "mask": mask_u8,
-                    "bbox": bbox,
-                    "label": f"object_{i}",
-                    "confidence": float(score),
-                })
-            return results
-        except Exception as e:
-            logger.error(f"Automatic SAM 3 segmentation failed: {e}")
-            return _get_mock_segmentation(img)
+        # Call predict with no prompts — returns all detected masks
+        masks, scores, _ = self.image_predictor.predict(
+            multimask_output=True,
+        )
+        results = []
+        for i, (mask, score) in enumerate(zip(masks, scores)):
+            if score < settings.segmentation_threshold:
+                continue
+            mask_u8 = mask.astype(np.uint8)
+            ys, xs = np.where(mask_u8)
+            if len(xs) == 0:
+                continue
+            bbox = [float(xs.min()), float(ys.min()), float(xs.max() - xs.min()), float(ys.max() - ys.min())]
+            results.append({
+                "mask": mask_u8,
+                "bbox": bbox,
+                "label": f"object_{i}",
+                "confidence": float(score),
+            })
+        return results
 
     def init_video(self, frames_dir: str | Path) -> dict | None:
         """Initialize video tracking state.
@@ -220,18 +162,14 @@ class SAM3Predictor:
         """
         if self.video_predictor is None:
             return None
-        try:
-            response = self.video_predictor.handle_request({
-                "type": "start_session",
-                "resource_path": str(frames_dir),
-            })
-            return {
-                "session_id": response["session_id"],
-                "predictor": self.video_predictor,
-            }
-        except Exception as e:
-            logger.error(f"SAM 3 video init failed: {e}")
-            return None
+        response = self.video_predictor.handle_request({
+            "type": "start_session",
+            "resource_path": str(frames_dir),
+        })
+        return {
+            "session_id": response["session_id"],
+            "predictor": self.video_predictor,
+        }
 
     def add_prompt(self, inference_state, frame_idx: int, obj_id: int,
                    box: np.ndarray | None = None, points: np.ndarray | None = None,
@@ -251,25 +189,21 @@ class SAM3Predictor:
         predictor = inference_state["predictor"]
         session_id = inference_state["session_id"]
 
-        try:
-            request = {
-                "type": "add_prompt",
-                "session_id": session_id,
-                "frame_index": frame_idx,
-            }
+        request = {
+            "type": "add_prompt",
+            "session_id": session_id,
+            "frame_index": frame_idx,
+        }
 
-            if box is not None:
-                request["bounding_boxes"] = [box.tolist()]
-                request["bounding_box_labels"] = [1]  # 1 = foreground
+        if box is not None:
+            request["bounding_boxes"] = [box.tolist()]
+            request["bounding_box_labels"] = [1]  # 1 = foreground
 
-            if points is not None and labels is not None:
-                request["points"] = points.tolist()
-                request["point_labels"] = labels.tolist()
+        if points is not None and labels is not None:
+            request["points"] = points.tolist()
+            request["point_labels"] = labels.tolist()
 
-            return predictor.handle_request(request)
-        except Exception as e:
-            logger.error(f"SAM 3 video add_prompt failed: {e}")
-        return None
+        return predictor.handle_request(request)
 
     def propagate_video(self, inference_state) -> list[tuple[int, int, np.ndarray]]:
         """Propagate tracking through video.
@@ -282,34 +216,30 @@ class SAM3Predictor:
         predictor = inference_state["predictor"]
         session_id = inference_state["session_id"]
 
+        results = []
+        for out in predictor.handle_stream_request({
+            "type": "propagate_in_video",
+            "session_id": session_id,
+            "propagation_direction": "both",
+        }):
+            frame_idx = out["frame_index"]
+            outputs = out.get("outputs", {})
+            masks = outputs.get("out_binary_masks", [])
+            obj_ids = outputs.get("out_obj_ids", [])
+            for i in range(len(masks)):
+                mask = masks[i].astype(np.uint8)
+                results.append((int(frame_idx), int(obj_ids[i]), mask))
+
+        # Clean up session
         try:
-            results = []
-            for out in predictor.handle_stream_request({
-                "type": "propagate_in_video",
+            predictor.handle_request({
+                "type": "close_session",
                 "session_id": session_id,
-                "propagation_direction": "both",
-            }):
-                frame_idx = out["frame_index"]
-                outputs = out.get("outputs", {})
-                masks = outputs.get("out_binary_masks", [])
-                obj_ids = outputs.get("out_obj_ids", [])
-                for i in range(len(masks)):
-                    mask = masks[i].astype(np.uint8)
-                    results.append((int(frame_idx), int(obj_ids[i]), mask))
+            })
+        except Exception:
+            pass
 
-            # Clean up session
-            try:
-                predictor.handle_request({
-                    "type": "close_session",
-                    "session_id": session_id,
-                })
-            except Exception:
-                pass
-
-            return results
-        except Exception as e:
-            logger.error(f"SAM 3 video propagation failed: {e}")
-            return []
+        return results
 
 
 def mask_to_base64(mask: np.ndarray) -> str | None:
