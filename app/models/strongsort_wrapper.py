@@ -83,6 +83,7 @@ class BoTSORTTracker:
                     proximity_thresh=0.5,
                     appearance_thresh=0.25,
                     fuse_first_frame=True,
+                    with_reid=True,
                 )
                 self.tracker = BOTSORT(tracker_args)
             elif has_var_keyword:
