@@ -57,9 +57,11 @@ class SAM3Predictor:
             if hasattr(self._model, "inst_interactive_predictor") and self._model.inst_interactive_predictor is not None:
                 self.image_predictor = self._model.inst_interactive_predictor
 
-                # Verify the predictor has required internal components
-                if not hasattr(self.image_predictor, 'forward_image') or self.image_predictor.forward_image is None:
-                    raise RuntimeError("SAM 3 interactive predictor missing forward_image component")
+                # Verify the predictor has required methods for the API we use
+                required_methods = ['set_image', 'predict']
+                missing = [m for m in required_methods if not hasattr(self.image_predictor, m)]
+                if missing:
+                    raise RuntimeError(f"SAM 3 interactive predictor missing methods: {missing}")
 
                 logger.info("SAM 3 image predictor loaded")
             else:
