@@ -70,15 +70,37 @@ class BoTSORTTracker:
                 p.kind == inspect.Parameter.VAR_KEYWORD
                 for p in sig.parameters.values()
             )
-            if has_var_keyword:
+
+            # Check if 'args' is required (some versions need argparse.Namespace)
+            args_param = sig.parameters.get("args")
+            needs_args = args_param and args_param.default == inspect.Parameter.empty
+
+            if needs_args:
+                # Construct a Namespace-like object with tracker config
+                from argparse import Namespace
+                tracker_args = Namespace(
+                    tracking_method="botsort",
+                    tracking_model="yolov8n.pt",
+                    track_high_thresh=0.5,
+                    track_low_thresh=0.1,
+                    new_track_thresh=0.6,
+                    track_buffer=30,
+                    match_thresh=0.8,
+                    proximity_thresh=0.5,
+                    appearance_thresh=0.25,
+                    fuse_first_frame=True,
+                )
+                self.tracker = BOTSORT(tracker_args)
+            elif has_var_keyword:
                 use_kwargs = candidate_kwargs
+                self.tracker = BOTSORT(**use_kwargs)
             else:
                 use_kwargs = {k: v for k, v in candidate_kwargs.items() if k in accepted}
+                self.tracker = BOTSORT(**use_kwargs)
 
-            self.tracker = BOTSORT(**use_kwargs)
             self._backend = "ultralytics"
-            logger.info("BoT-SORT initialized (ultralytics, params: %s)",
-                        list(use_kwargs.keys()) or "none")
+            logger.info("BoT-SORT initialized (ultralytics, %s)",
+                        "args=Namespace" if needs_args else f"params: {list(use_kwargs.keys()) or 'none'}")
             return
         except (ImportError, AttributeError):
             logger.info("ultralytics BOTSORT not available, trying standalone botsort")
