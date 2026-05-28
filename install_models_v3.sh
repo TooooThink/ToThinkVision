@@ -577,7 +577,7 @@ install_shape_of_motion() {
         fi
 
         if [ ! -f "$zip_dest" ]; then
-            # Method 2: gh-proxy.com
+            # Method 2: gh-proxy.com (general GitHub proxy)
             echo "  Method 2: gh-proxy.com mirror..."
             if curl -fSL --retry 3 --connect-timeout 15 -o "$zip_dest" "https://gh-proxy.com/$raw_url" 2>&1; then
                 if _is_valid_zip "$zip_dest"; then
@@ -594,8 +594,40 @@ install_shape_of_motion() {
         fi
 
         if [ ! -f "$zip_dest" ]; then
-            # Method 3: ghproxy.com (different mirror)
-            echo "  Method 3: ghproxy.com mirror..."
+            # Method 3: ghfast.top (specialized for GitHub releases with redirects)
+            echo "  Method 3: ghfast.top mirror (release-friendly)..."
+            if curl -fSL --retry 3 --connect-timeout 15 -o "$zip_dest" "https://ghfast.top/$raw_url" 2>&1; then
+                if _is_valid_zip "$zip_dest"; then
+                    echo "  ✓ Downloaded (ghfast.top)"
+                else
+                    echo "  ⚠ Not a valid zip"
+                    rm -f "$zip_dest"
+                fi
+            else
+                rm -f "$zip_dest"
+                echo "  ⚠ ghfast.top failed"
+            fi
+        fi
+
+        if [ ! -f "$zip_dest" ]; then
+            # Method 4: gh.ddlc.top (another release-friendly mirror)
+            echo "  Method 4: gh.ddlc.top mirror..."
+            if curl -fSL --retry 3 --connect-timeout 15 -o "$zip_dest" "https://gh.ddlc.top/$raw_url" 2>&1; then
+                if _is_valid_zip "$zip_dest"; then
+                    echo "  ✓ Downloaded (gh.ddlc.top)"
+                else
+                    echo "  ⚠ Not a valid zip"
+                    rm -f "$zip_dest"
+                fi
+            else
+                rm -f "$zip_dest"
+                echo "  ⚠ gh.ddlc.top failed"
+            fi
+        fi
+
+        if [ ! -f "$zip_dest" ]; then
+            # Method 5: ghproxy.com (older mirror, sometimes works)
+            echo "  Method 5: ghproxy.com mirror..."
             if curl -fSL --retry 3 --connect-timeout 15 -o "$zip_dest" "https://ghproxy.com/$raw_url" 2>&1; then
                 if _is_valid_zip "$zip_dest"; then
                     echo "  ✓ Downloaded (ghproxy.com)"
@@ -610,9 +642,9 @@ install_shape_of_motion() {
         fi
 
         if [ ! -f "$zip_dest" ]; then
-            # Method 4: wget (sometimes handles redirects better)
+            # Method 6: wget (sometimes handles redirects better)
             if command -v wget &>/dev/null; then
-                echo "  Method 4: wget..."
+                echo "  Method 6: wget..."
                 if wget --tries=3 --timeout=30 -O "$zip_dest" "$raw_url" 2>&1; then
                     if _is_valid_zip "$zip_dest"; then
                         echo "  ✓ Downloaded (wget)"
