@@ -140,17 +140,26 @@ class BoTSORTTracker:
     def _update_botsort(self, detections: list[dict], frame: np.ndarray | None,
                         frame_idx: int) -> list[dict]:
         """Update using BoT-SORT."""
-        # Convert detections to format: [x1, y1, x2, y2, conf]
-        bboxes = []
-        for det in detections:
-            x, y, w, h = det["bbox"]
-            bboxes.append([x, y, x + w, y + h, det.get("confidence", 0.5)])
-        bboxes = np.array(bboxes)
+        # ultralytics BYTETracker.update() expects a results object with attributes:
+        #   .conf (scores), .cls (class ids), .xywh (bboxes in center format)
+        # Build a duck-typed wrapper to satisfy that interface.
+        confs = np.array([det.get("confidence", 0.5) for det in detections], dtype=np.float32)
+        cls_ids = np.array([det.get("cls", 0) for det in detections], dtype=np.int64)
+        xywh = np.array(
+            [[det["bbox"][0] + det["bbox"][2] / 2,
+              det["bbox"][1] + det["bbox"][3] / 2,
+              det["bbox"][2], det["bbox"][3]] for det in detections],
+            dtype=np.float32,
+        )
 
-        if self._backend == "ultralytics":
-            tracks = self.tracker.update(bboxes, frame)
-        else:
-            tracks = self.tracker.update(bboxes, frame)
+        class _Results:
+            def __init__(self, conf, cls, xywh):
+                self.conf = conf
+                self.cls = cls
+                self.xywh = xywh
+
+        results = _Results(confs, cls_ids, xywh)
+        tracks = self.tracker.update(results, img=frame)
 
         results = []
         for track in tracks:
