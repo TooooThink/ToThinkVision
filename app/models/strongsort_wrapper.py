@@ -40,17 +40,31 @@ class BoTSORTTracker:
         try:
             from ultralytics.trackers.bot_sort import BOTSORT
 
-            self.tracker = BOTSORT(
-                model_weights=None,
-                track_high_thresh=0.5,
-                track_low_thresh=0.1,
-                new_track_thresh=0.6,
-                track_buffer=30,
-                match_thresh=0.8,
-                proximity_thresh=0.5,
-                appearance_thresh=0.25,
-                fuse_first_frame=True,
-            )
+            # API changed across ultralytics versions — try without model_weights first
+            try:
+                self.tracker = BOTSORT(
+                    track_high_thresh=0.5,
+                    track_low_thresh=0.1,
+                    new_track_thresh=0.6,
+                    track_buffer=30,
+                    match_thresh=0.8,
+                    proximity_thresh=0.5,
+                    appearance_thresh=0.25,
+                    fuse_first_frame=True,
+                )
+            except TypeError:
+                # Older version might need model_weights
+                self.tracker = BOTSORT(
+                    model_weights=None,
+                    track_high_thresh=0.5,
+                    track_low_thresh=0.1,
+                    new_track_thresh=0.6,
+                    track_buffer=30,
+                    match_thresh=0.8,
+                    proximity_thresh=0.5,
+                    appearance_thresh=0.25,
+                    fuse_first_frame=True,
+                )
             self._backend = "ultralytics"
             logger.info("BoT-SORT initialized (ultralytics)")
             return
