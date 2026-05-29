@@ -575,7 +575,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     if 'depth_model' in locals() and depth_model is not None:
         del depth_model
     if 'tracker' in locals() and tracker is not None:
-        del tracker
+        tracker = None
     clear_gpu_memory()
 
     # Try Spann3R first if enabled (spatial memory for better long sequences)
@@ -688,7 +688,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             if 'depth_model' in locals() and depth_model is not None:
                 del depth_model
             if 'tracker' in locals() and tracker is not None:
-                del tracker
+                tracker = None
             if 'reconstructor' in locals():
                 del reconstructor
             if 'gs_pipe' in locals():
