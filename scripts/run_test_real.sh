@@ -161,6 +161,11 @@ if os.path.exists('test_input.png'):
     print(f'  -> {p} ({time.time()-t0:.1f}s)')
 
     print(f'\\nImage 2D test DONE in {elapsed:.1f}s')
+
+    # Clean up models from Test 1 before Test 2
+    from app.pipeline import cleanup_all_models
+    print('\\nCleaning up GPU memory after Test 1...')
+    cleanup_all_models()
 else:
     print('SKIPPED: test_input.png not found')
 
@@ -211,6 +216,11 @@ if os.path.exists('test_input.mp4'):
     print(f'  -> {p}')
 
     print(f'\\nVideo 3D test DONE in {elapsed:.1f}s')
+
+    # Clean up models from Test 2 before Test 3
+    from app.pipeline import cleanup_all_models
+    print('\\nCleaning up GPU memory after Test 2...')
+    cleanup_all_models()
 else:
     print()
     print('SKIPPED: test_input.mp4 not found')

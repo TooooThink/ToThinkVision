@@ -57,6 +57,80 @@ from app.utils.pointcloud import backproject_depth, compute_normals, filter_poin
 
 logger = logging.getLogger(__name__)
 
+
+def clear_gpu_memory():
+    """Clear GPU memory by deleting models and calling garbage collection."""
+    import gc
+    import torch
+
+    # Clear CUDA cache
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+    # Force garbage collection
+    gc.collect()
+
+    # Log memory usage
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        logger.info(f"GPU memory: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
+
+
+def cleanup_all_models():
+    """Delete all globally cached model instances to free GPU memory."""
+    import gc
+    import torch
+
+    # Reset all global singletons
+    from app.models import grounding_dino, sam3, depth_pro, strongsort_wrapper, mast3r, cotracker3
+    from app.models import completion_2d, completion_3d, gaussian_splatting, omniparser
+
+    # GroundingDINO
+    grounding_dino._detector = None
+
+    # SAM3
+    sam3._sam3_predictor = None
+
+    # Depth Pro
+    depth_pro._depth_model = None
+
+    # Tracker
+    strongsort_wrapper._tracker = None
+
+    # 3D Reconstruction
+    mast3r._reconstructor = None
+
+    # CoTracker3
+    cotracker3._cotracker_predictor = None
+
+    # Completion models
+    if hasattr(completion_2d, '_completion_2d'):
+        completion_2d._completion_2d = None
+    if hasattr(completion_3d, '_completion_3d'):
+        completion_3d._completion_3d = None
+
+    # Gaussian Splatting
+    if hasattr(gaussian_splatting, '_splat_pipeline'):
+        gaussian_splatting._splat_pipeline = None
+
+    # OmniParser
+    if hasattr(omniparser, '_omniparser'):
+        omniparser._omniparser = None
+
+    # Clear GPU memory
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+    gc.collect()
+
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        logger.info(f"All models cleaned up. GPU: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
+
 # Label classification
 UI_LABELS = {"button", "text", "input", "icon", "image", "navigation", "card", "slider", "toggle"}
 GAME_LABELS = {"floor", "wall", "door", "npc", "item", "prop", "terrain", "effect", "character", "weapon"}
@@ -494,6 +568,16 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     camera_poses = []
     reconstruction_backend = "none"
 
+    # Clean up models no longer needed before loading 3D reconstruction
+    logger.info("Clearing GPU memory before 3D reconstruction...")
+    if 'sam3' in locals() and sam3 is not None:
+        del sam3
+    if 'depth_model' in locals() and depth_model is not None:
+        del depth_model
+    if 'tracker' in locals() and tracker is not None:
+        del tracker
+    clear_gpu_memory()
+
     # Try Spann3R first if enabled (spatial memory for better long sequences)
     if config.enable_spann3r and config.enable_mast3r:
         try:
@@ -562,6 +646,14 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     # ─── 3D Gaussian Splatting (optional) ───────────────────
     gs_data = None
     if config.enable_gaussian_splatting:
+        # Clean up 3D reconstruction models before Gaussian Splatting
+        logger.info("Clearing GPU memory before 3D Gaussian Splatting...")
+        if 'reconstructor' in locals():
+            del reconstructor
+        if 'spann3r' in locals():
+            del spann3r
+        clear_gpu_memory()
+
         gs_pipe = get_splat_pipeline()
         gs_data = gs_pipe.train(frame_dir, settings.output_dir / "gs_training")
 
@@ -589,6 +681,22 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     cotracker_data = None
     if config.enable_cotracker3 and len(frame_paths) >= 2:
         try:
+            # Clean up models no longer needed before loading CoTracker3
+            logger.info("Clearing GPU memory before CoTracker3...")
+            if 'sam3' in locals() and sam3 is not None:
+                del sam3
+            if 'depth_model' in locals() and depth_model is not None:
+                del depth_model
+            if 'tracker' in locals() and tracker is not None:
+                del tracker
+            if 'reconstructor' in locals():
+                del reconstructor
+            if 'gs_pipe' in locals():
+                del gs_pipe
+            if 'objectgs_pipe' in locals():
+                del objectgs_pipe
+            clear_gpu_memory()
+
             from app.models.cotracker3 import get_cotracker
             cotracker = get_cotracker(mode="offline")
             if cotracker.model is not None:
