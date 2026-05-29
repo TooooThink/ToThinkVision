@@ -23,7 +23,7 @@ class ObjExporter(BaseExporter):
     file_extension = ".obj"
     mime_type = "model/obj"
 
-    def export(self, data: StructuredOutput) -> Path:
+    def export(self, data: StructuredOutput) -> Path | None:
         objects_with_mesh = [obj for obj in data.objects
                             if obj.mesh_3d is not None and obj.mesh_3d.vertices]
         if objects_with_mesh:
@@ -33,7 +33,9 @@ class ObjExporter(BaseExporter):
         elif data.point_cloud and data.point_cloud.points:
             return self._export_from_pointcloud(data)
         else:
-            raise ValueError("No 3D data available for OBJ export.")
+            import logging
+            logging.getLogger(__name__).warning("No 3D data available for OBJ export — skipping.")
+            return None
 
     def _export_meshes(self, data: StructuredOutput,
                        objects_with_mesh: list) -> Path:

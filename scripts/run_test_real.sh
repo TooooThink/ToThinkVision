@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ttv_real
 #SBATCH --partition=a100
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=03:00:00
@@ -194,10 +194,16 @@ if os.path.exists('test_input.mp4'):
     print('── Exports ──')
     print('Exporting glTF...')
     p = GltfExporter().export(result)
-    print(f'  -> {p}')
+    if p:
+        print(f'  -> {p}')
+    else:
+        print('  (skipped: no 3D data)')
     print('Exporting OBJ+MTL...')
     p = ObjExporter().export(result)
-    print(f'  -> {p}')
+    if p:
+        print(f'  -> {p}')
+    else:
+        print('  (skipped: no 3D data)')
 
     # Also export PSD for video (each frame = group, each object = layer)
     print('Exporting PSD (animated, frame groups)...')

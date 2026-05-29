@@ -25,7 +25,7 @@ class GltfExporter(BaseExporter):
     file_extension = ".gltf"
     mime_type = "model/gltf+json"
 
-    def export(self, data: StructuredOutput) -> Path:
+    def export(self, data: StructuredOutput) -> Path | None:
         # Prefer per-object meshes with textures
         objects_with_mesh = [obj for obj in data.objects
                             if obj.mesh_3d is not None and obj.mesh_3d.vertices]
@@ -37,7 +37,9 @@ class GltfExporter(BaseExporter):
         elif data.point_cloud and data.point_cloud.points:
             return self._export_from_pointcloud(data)
         else:
-            raise ValueError("No 3D data available for glTF export.")
+            import logging
+            logging.getLogger(__name__).warning("No 3D data available for glTF export — skipping.")
+            return None
 
     def _export_from_meshes(self, data: StructuredOutput,
                             objects_with_mesh: list) -> Path:
