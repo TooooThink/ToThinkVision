@@ -171,6 +171,21 @@ class BoTSORTTracker:
             if track_id_str not in self.tracks:
                 self.tracks[track_id_str] = {"history": []}
 
+            # Clip tracker output to frame bounds — Kalman filter predictions
+            # can drift outside the image, especially near edges.
+            if frame is not None:
+                h_frame, w_frame = frame.shape[:2]
+                x1 = max(0.0, min(float(x1), w_frame - 1))
+                y1 = max(0.0, min(float(y1), h_frame - 1))
+                x2 = max(0.0, min(float(x2), w_frame))
+                y2 = max(0.0, min(float(y2), h_frame))
+            else:
+                x1, y1, x2, y2 = float(x1), float(y1), float(x2), float(y2)
+
+            # Skip degenerate boxes (fully outside frame)
+            if x2 <= x1 or y2 <= y1:
+                continue
+
             cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
             self.tracks[track_id_str]["history"].append({
                 "x": float(cx), "y": float(cy), "t": frame_idx
@@ -178,7 +193,7 @@ class BoTSORTTracker:
 
             results.append({
                 "id": track_id_str,
-                "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
+                "bbox": [x1, y1, x2 - x1, y2 - y1],
                 "confidence": float(conf),
                 "history": self.tracks[track_id_str]["history"],
             })

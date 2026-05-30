@@ -98,14 +98,35 @@ class MaskAccumulator:
         # Place on full-frame canvas if bbox provided
         if bbox is not None and len(bbox) == 4:
             x, y, w, h = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-            canvas = np.zeros((self.height, self.width), dtype=np.uint8)
-            y2 = min(y + h, self.height)
-            x2 = min(x + w, self.width)
-            mh = min(mask_bin.shape[0], y2 - y)
-            mw = min(mask_bin.shape[1], x2 - x)
-            if mh > 0 and mw > 0:
-                canvas[y:y + mh, x:x + mw] = mask_bin[:mh, :mw]
-            mask_bin = canvas
+
+            # Skip if bbox is completely outside frame
+            if x + w <= 0 or y + h <= 0 or x >= self.width or y >= self.height or w <= 0 or h <= 0:
+                mask_bin = np.zeros((self.height, self.width), dtype=np.uint8)
+            else:
+                canvas = np.zeros((self.height, self.width), dtype=np.uint8)
+
+                # Clip to frame bounds
+                x1 = max(0, x)
+                y1 = max(0, y)
+                x2 = min(x + w, self.width)
+                y2 = min(y + h, self.height)
+
+                # Calculate mask region to copy
+                mask_x1 = max(0, -x)  # offset in mask if x was negative
+                mask_y1 = max(0, -y)  # offset in mask if y was negative
+                mask_x2 = min(mask_x1 + (x2 - x1), mask_bin.shape[1])
+                mask_y2 = min(mask_y1 + (y2 - y1), mask_bin.shape[0])
+
+                # Only copy if both regions are valid
+                if (mask_y2 > mask_y1 and mask_x2 > mask_x1 and
+                    y2 > y1 and x2 > x1):
+                    mask_region = mask_bin[mask_y1:mask_y2, mask_x1:mask_x2]
+                    # Ensure shapes match before assignment
+                    if (mask_region.shape[0] == y2 - y1 and
+                        mask_region.shape[1] == x2 - x1):
+                        canvas[y1:y2, x1:x2] = mask_region
+
+                mask_bin = canvas
 
         if track_id not in self._accumulated:
             self._accumulated[track_id] = mask_bin.copy()
