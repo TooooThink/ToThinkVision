@@ -5,11 +5,16 @@ from __future__ import annotations
 import base64
 import logging
 import time
+import warnings
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+# Suppress non-fatal numpy warnings from depth/trajectory calculations
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*divide by zero.*')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value.*')
 
 from app.config import settings
 from app.exporters.image_exporter import (
@@ -589,10 +594,10 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 )
                 reconstruction_backend = "spann3r"
                 logger.info("3D reconstruction via Spann3R (spatial memory)")
-        except Exception as e:
-            logger.warning("Spann3R failed: %s, falling back to MASt3R/VGGT", e)
+            else:
+                logger.info("Spann3R not available, trying MASt3R/VGGT")
 
-    # Fall back to MASt3R/VGGT
+    # Try MASt3R/VGGT
     if reconstruction_backend == "none" and config.enable_mast3r:
         reconstructor = get_reconstructor()
         pc_data, camera_poses = reconstructor.reconstruct(frame_dir)
@@ -701,20 +706,30 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             cotracker = get_cotracker(mode="offline")
             if cotracker.model is not None:
                 # Load frames as numpy array for CoTracker3
+                # Limit frames and grid_size to avoid CUDA OOM:
+                # CoTracker3 loads entire video tensor (T,3,H,W) into GPU.
                 from PIL import Image as PILImage
+                max_cotracker_frames = min(50, config.max_video_frames)
+                cotracker_frame_paths = frame_paths[:max_cotracker_frames]
                 cotracker_frames = []
-                for fp in frame_paths[:config.max_video_frames]:
+                for fp in cotracker_frame_paths:
                     fimg = np.array(PILImage.open(fp).convert("RGB"))
                     cotracker_frames.append(fimg)
                 cotracker_frames = np.stack(cotracker_frames)
+                logger.info("CoTracker3: processing %d frames with grid_size=20 (500 points)",
+                            len(cotracker_frames))
                 cotracker_data = cotracker.track_video(
                     frames=cotracker_frames,
-                    grid_size=50,
+                    grid_size=20,
                     query_frame=0,
                 )
                 model_versions["cotracker3"] = "offline"
                 logger.info("CoTracker3: tracked %d points across %d frames",
                             cotracker_data.get("num_points", 0), len(cotracker_frames))
+                # Free CoTracker3 model memory for downstream stages
+                del cotracker
+                del cotracker_frames
+                clear_gpu_memory()
         except Exception as e:
             logger.warning("CoTracker3 failed: %s", e)
 
@@ -1086,6 +1101,56 @@ def _crop_object(img: np.ndarray, bbox: list[float]) -> np.ndarray | None:
     if x2 <= x or y2 <= y:
         return None
     return img[y:y2, x:x2]
+
+
+def _estimate_simple_camera_poses(frame_paths: list[Path], width: int, height: int) -> list[dict]:
+    """Estimate simple camera poses when no 3D backend is available.
+
+    Uses a circular orbit assumption: camera moves in a 90° arc around the scene.
+    Returns list of camera pose dicts compatible with downstream 3D reconstruction.
+    """
+    from app.utils.camera import estimate_intrinsics, rt_matrix_to_position, rt_matrix_to_quaternion
+
+    K = estimate_intrinsics(width, height)
+    n = len(frame_paths)
+    poses = []
+
+    for i in range(n):
+        t = i / max(n - 1, 1)
+        angle = t * np.pi * 0.5  # 90 degree arc
+        radius = 3.0
+
+        # Camera position on arc
+        cx = radius * np.sin(angle)
+        cy = 0.5
+        cz = radius * np.cos(angle)
+
+        # Look-at rotation (camera looking at origin)
+        target = np.array([0, 0, 0])
+        camera_pos = np.array([cx, cy, cz])
+        forward = target - camera_pos
+        forward /= np.linalg.norm(forward)
+
+        right = np.cross(forward, np.array([0, 1, 0]))
+        right /= np.linalg.norm(right)
+        up = np.cross(right, forward)
+
+        R = np.column_stack([right, up, -forward])
+        T = -R.T @ camera_pos
+
+        extrinsics = np.eye(4)
+        extrinsics[:3, :3] = R
+        extrinsics[:3, 3] = T
+
+        poses.append({
+            "frame_idx": i,
+            "intrinsics": K.tolist(),
+            "extrinsics": extrinsics.tolist(),
+            "position": tuple(float(x) for x in rt_matrix_to_position(R, T)),
+            "rotation": tuple(float(x) for x in rt_matrix_to_quaternion(R)),
+        })
+
+    return poses
 
 
 def _image_to_base64(img: np.ndarray) -> str | None:

@@ -108,8 +108,9 @@ class CoTracker3Predictor:
     def track_video(
         self,
         frames: np.ndarray | list[np.ndarray],
-        grid_size: int = 50,
+        grid_size: int = 20,
         query_frame: int = 0,
+        max_resolution: int = 720,
     ) -> dict[str, Any]:
         """Track dense points across video frames.
 
@@ -117,6 +118,7 @@ class CoTracker3Predictor:
             frames: (T, H, W, 3) uint8 numpy array or list of frames
             grid_size: number of points per axis (grid_size^2 total points)
             query_frame: frame index to sample query points from
+            max_resolution: downscale if height/width exceeds this (to avoid OOM)
 
         Returns:
             dict with:
@@ -134,6 +136,27 @@ class CoTracker3Predictor:
             frames = np.stack(frames)
 
         T, H, W, C = frames.shape
+
+        # Save original resolution for coordinate scaling
+        original_H, original_W = H, W
+
+        # Downscale if needed to avoid OOM
+        scale = 1.0
+        if max(H, W) > max_resolution:
+            scale = max_resolution / max(H, W)
+            new_H, new_W = int(H * scale), int(W * scale)
+            logger.info(f"CoTracker3: downscaling {H}x{W} → {new_H}x{new_W} to avoid OOM")
+
+            # Downscale frames
+            from PIL import Image as PILImage
+            frames_down = []
+            for frame in frames:
+                img = PILImage.fromarray(frame)
+                img = img.resize((new_W, new_H), PILImage.BILINEAR)
+                frames_down.append(np.array(img))
+            frames = np.stack(frames_down)
+            T, H, W, C = frames.shape
+
         video = torch.from_numpy(frames).permute(0, 3, 1, 2)[None].float().to(self.device)
 
         with torch.no_grad():
@@ -158,6 +181,12 @@ class CoTracker3Predictor:
         if vis.ndim == 3:
             vis = vis[:, :, 0]
         visibility = vis > 0.5
+
+        # Scale coordinates back to original resolution if downscaled
+        if scale != 1.0:
+            tracks[:, :, 0] *= (original_W / W)  # x coordinates
+            tracks[:, :, 1] *= (original_H / H)  # y coordinates
+            H, W = original_H, original_W
 
         # Extract query points from first frame
         query_points = tracks[query_frame]

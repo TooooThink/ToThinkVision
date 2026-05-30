@@ -3,7 +3,7 @@
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=48G
+#SBATCH --mem=256G
 #SBATCH --time=03:00:00
 #SBATCH --output=logs/ttv_real_%j.out
 #SBATCH --error=logs/ttv_real_%j.err
@@ -75,6 +75,13 @@ TORCH_LIB="$(python -c 'import torch; import os; print(os.path.join(os.path.dirn
 if [ -n "$TORCH_LIB" ] && [ -d "$TORCH_LIB" ]; then
     export LD_LIBRARY_PATH="$TORCH_LIB:$LD_LIBRARY_PATH"
     echo "Added $TORCH_LIB to LD_LIBRARY_PATH"
+fi
+
+# Add MASt3R to PYTHONPATH (no setup.py, needs manual path)
+MAST3R_PATH="$REPOS_DIR/mast3r"
+if [ -d "$MAST3R_PATH" ]; then
+    export PYTHONPATH="$MAST3R_PATH:$MAST3R_PATH/dust3r:$PYTHONPATH"
+    echo "Added MASt3R to PYTHONPATH"
 fi
 
 # ── Model repo env vars (set by install_models_v3.sh, re-export for SLURM) ──
