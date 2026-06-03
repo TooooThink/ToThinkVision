@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=ttv_real
-#SBATCH --partition=a100
+#SBATCH --partition=hlli_exc 
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=180G
