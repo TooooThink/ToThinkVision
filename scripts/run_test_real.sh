@@ -3,7 +3,7 @@
 #SBATCH --partition=a100
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=256G
+#SBATCH --mem=180G
 #SBATCH --time=03:00:00
 #SBATCH --output=logs/ttv_real_%j.out
 #SBATCH --error=logs/ttv_real_%j.err
