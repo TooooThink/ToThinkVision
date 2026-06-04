@@ -84,13 +84,22 @@ class SAM3Predictor:
                 raise RuntimeError("SAM 3 model loaded but interactive predictor not available")
 
             # Try video predictor
+            # Use multiplex video predictor for sam3.1_multiplex.pt weights,
+            # regular video predictor for sam3.pt weights
+            is_multiplex = "multiplex" in ckpt
             try:
-                from sam3.model_builder import build_sam3_video_predictor
-
-                self.video_predictor = build_sam3_video_predictor(
-                    checkpoint_path=ckpt if has_local_ckpt else None,
-                )
-                logger.info("SAM 3 video predictor loaded")
+                if is_multiplex:
+                    from sam3.model_builder import build_sam3_multiplex_video_predictor
+                    self.video_predictor = build_sam3_multiplex_video_predictor(
+                        checkpoint_path=ckpt if has_local_ckpt else None,
+                    )
+                    logger.info("SAM 3 multiplex video predictor loaded")
+                else:
+                    from sam3.model_builder import build_sam3_video_predictor
+                    self.video_predictor = build_sam3_video_predictor(
+                        checkpoint_path=ckpt if has_local_ckpt else None,
+                    )
+                    logger.info("SAM 3 video predictor loaded")
             except Exception as e:
                 logger.warning(f"SAM 3 video predictor not available: {e}")
                 logger.info("Video will use frame-by-frame segmentation + BoT-SORT tracking instead")
@@ -185,9 +194,21 @@ class SAM3Predictor:
             "type": "start_session",
             "resource_path": str(frames_dir),
         })
+        # Read frame dimensions for coordinate normalization
+        frames_dir = Path(frames_dir)
+        frame_width, frame_height = 1, 1
+        for ext in ["*.jpg", "*.png"]:
+            frame_files = sorted(frames_dir.glob(ext))
+            if frame_files:
+                first_frame = Image.open(frame_files[0])
+                frame_width, frame_height = first_frame.size
+                first_frame.close()
+                break
         return {
             "session_id": response["session_id"],
             "predictor": self.video_predictor,
+            "frame_width": frame_width,
+            "frame_height": frame_height,
         }
 
     def add_prompt(self, inference_state, frame_idx: int, obj_id: int,
@@ -215,7 +236,18 @@ class SAM3Predictor:
         }
 
         if box is not None:
-            request["bounding_boxes"] = [box.tolist()]
+            # Convert pixel XYXY to normalized XYWH format
+            # SAM3 video predictor expects: [x, y, w, h] in [0, 1] range
+            x1, y1, x2, y2 = box
+            # Get frame dimensions from session info
+            frame_w = inference_state.get("frame_width", 1)
+            frame_h = inference_state.get("frame_height", 1)
+            # Convert to normalized XYWH (top-left corner + width/height)
+            x = x1 / frame_w
+            y = y1 / frame_h
+            w = (x2 - x1) / frame_w
+            h = (y2 - y1) / frame_h
+            request["bounding_boxes"] = [[x, y, w, h]]
             request["bounding_box_labels"] = [1]  # 1 = foreground
 
         if points is not None and labels is not None:
