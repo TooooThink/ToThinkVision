@@ -242,42 +242,34 @@ class Spann3RReconstructor:
 
     def _load_ply(self, ply_path: Path) -> dict[str, Any] | None:
         """Load point cloud from PLY file."""
-        try:
-            from plyfile import PlyData
-            plydata = PlyData.read(str(ply_path))
-            vertex = plydata["vertex"]
+        from plyfile import PlyData
+        plydata = PlyData.read(str(ply_path))
+        vertex = plydata["vertex"]
 
-            # Handle different plyfile versions
-            if hasattr(vertex, "data"):
-                vertex_data = vertex.data
-            else:
-                vertex_data = vertex
+        # PlyElement supports direct field access: vertex["x"], vertex["y"], etc.
+        # Also get the underlying numpy structured array for dtype inspection
+        vertex_array = vertex.data
 
-            x = np.asarray(vertex_data["x"])
-            y = np.asarray(vertex_data["y"])
-            z = np.asarray(vertex_data["z"])
-            points = np.stack([x, y, z], axis=-1)
+        x = np.asarray(vertex_array["x"])
+        y = np.asarray(vertex_array["y"])
+        z = np.asarray(vertex_array["z"])
+        points = np.stack([x, y, z], axis=-1)
 
-            colors = np.ones_like(points) * 128
-            # Check for color fields
-            dtype_names = vertex_data.dtype.names if hasattr(vertex_data.dtype, 'names') and vertex_data.dtype.names else []
-            if "red" in dtype_names:
-                colors[:, 0] = vertex_data["red"]
-                colors[:, 1] = vertex_data["green"]
-                colors[:, 2] = vertex_data["blue"]
+        colors = np.ones_like(points) * 128
+        field_names = vertex_array.dtype.names if vertex_array.dtype.names else []
+        if "red" in field_names:
+            colors[:, 0] = vertex_array["red"]
+            colors[:, 1] = vertex_array["green"]
+            colors[:, 2] = vertex_array["blue"]
 
-            # Downsample if too many points
-            max_points = 100000
-            if len(points) > max_points:
-                indices = np.random.choice(len(points), max_points, replace=False)
-                points = points[indices]
-                colors = colors[indices]
+        # Downsample if too many points
+        max_points = 100000
+        if len(points) > max_points:
+            indices = np.random.choice(len(points), max_points, replace=False)
+            points = points[indices]
+            colors = colors[indices]
 
-            return {"points": points.tolist(), "colors": colors.astype(np.uint8).tolist()}
-        except Exception as e:
-            logger.warning("Failed to load PLY with plyfile, trying simple parser: %s", e)
-            # Simple PLY parser without plyfile dependency
-            return self._load_ply_simple(ply_path)
+        return {"points": points.tolist(), "colors": colors.astype(np.uint8).tolist()}
 
     def _load_ply_simple(self, ply_path: Path) -> dict[str, Any] | None:
         """Simple PLY file parser (ASCII and binary_little_endian)."""
