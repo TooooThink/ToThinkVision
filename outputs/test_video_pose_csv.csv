@@ -1,2 +1,0 @@
-frame,object_id,label,pos_x,pos_y,pos_z,bbox_x,bbox_y,bbox_w,bbox_h,depth,is_moving,velocity_x,velocity_y
-0,obj_0000,video_object,140.0,260.0,5.0,100.0,200.0,80.0,120.0,0,True,5.0,2.0
