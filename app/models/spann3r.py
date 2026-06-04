@@ -149,9 +149,6 @@ class Spann3RReconstructor:
             "--save_ori",
         ]
 
-        if use_spatial_memory:
-            cmd.append("--use_memory")
-
         try:
             result = subprocess.run(
                 cmd,

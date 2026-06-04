@@ -56,8 +56,6 @@ echo "=== ToThinkVision Real Model Inference ==="
 echo "Start: $(date)"
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
 echo "VRAM: $(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null || echo 'N/A')"
-echo "CUDA: $(python -c 'import torch; print(torch.version.cuda)' 2>/dev/null || echo 'N/A')"
-echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'N/A')"
 
 # ── Environment ──
 echo ""
@@ -68,6 +66,7 @@ eval "$(conda shell.bash hook 2>/dev/null)" || source ~/miniconda3/etc/profile.d
 
 conda activate ttv 2>/dev/null || conda activate base
 echo "Python: $(which python)"
+echo "CUDA: $(python -c 'import torch; print(torch.version.cuda)' 2>/dev/null || echo 'N/A')"
 echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'N/A')"
 
 # Add PyTorch lib to LD_LIBRARY_PATH (needed for GroundingDINO _C extension)
