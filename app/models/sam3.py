@@ -39,10 +39,12 @@ class SAM3Predictor:
             from sam3.model_builder import build_sam3_image_model
 
             # Use SAM 3.1 weights from local cache (HF is gated + GPU nodes offline)
+            # Prefer sam3.pt for video predictor compatibility;
+            # sam3.1_multiplex.pt has extra detection weights but missing tracker layers
             cache = Path(settings.model_cache_dir)
-            ckpt_v31 = cache / "sam3.1" / "sam3.1_multiplex.pt"
             ckpt_v3 = cache / "sam3.pt"
-            ckpt = str(ckpt_v31 if ckpt_v31.exists() else ckpt_v3)
+            ckpt_v31 = cache / "sam3.1" / "sam3.1_multiplex.pt"
+            ckpt = str(ckpt_v3 if ckpt_v3.exists() else ckpt_v31)
             has_local_ckpt = Path(ckpt).exists()
 
             self._model = build_sam3_image_model(
@@ -91,6 +93,7 @@ class SAM3Predictor:
                 logger.info("SAM 3 video predictor loaded")
             except Exception as e:
                 logger.warning(f"SAM 3 video predictor not available: {e}")
+                logger.info("Video will use frame-by-frame segmentation + BoT-SORT tracking instead")
 
         except ImportError:
             raise RuntimeError(
