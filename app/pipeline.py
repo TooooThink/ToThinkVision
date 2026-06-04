@@ -585,17 +585,16 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
 
     # Try Spann3R first if enabled (spatial memory for better long sequences)
     if config.enable_spann3r and config.enable_mast3r:
-        try:
-            from app.models.spann3r import get_spann3r
-            spann3r = get_spann3r()
-            if spann3r.available:
-                pc_data, camera_poses = spann3r.reconstruct(
-                    frame_dir, sample_interval=config.mast3r_sample_interval,
-                )
-                reconstruction_backend = "spann3r"
-                logger.info("3D reconstruction via Spann3R (spatial memory)")
-            else:
-                logger.info("Spann3R not available, trying MASt3R/VGGT")
+        from app.models.spann3r import get_spann3r
+        spann3r = get_spann3r()
+        if spann3r.available:
+            pc_data, camera_poses = spann3r.reconstruct(
+                frame_dir, sample_interval=config.mast3r_sample_interval,
+            )
+            reconstruction_backend = "spann3r"
+            logger.info("3D reconstruction via Spann3R (spatial memory)")
+        else:
+            logger.info("Spann3R not available, trying MASt3R/VGGT")
 
     # Try MASt3R/VGGT
     if reconstruction_backend == "none" and config.enable_mast3r:
