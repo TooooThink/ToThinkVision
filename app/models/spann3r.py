@@ -246,16 +246,25 @@ class Spann3RReconstructor:
             from plyfile import PlyData
             plydata = PlyData.read(str(ply_path))
             vertex = plydata["vertex"]
-            x = np.asarray(vertex["x"])
-            y = np.asarray(vertex["y"])
-            z = np.asarray(vertex["z"])
+
+            # Handle different plyfile versions
+            if hasattr(vertex, "data"):
+                vertex_data = vertex.data
+            else:
+                vertex_data = vertex
+
+            x = np.asarray(vertex_data["x"])
+            y = np.asarray(vertex_data["y"])
+            z = np.asarray(vertex_data["z"])
             points = np.stack([x, y, z], axis=-1)
 
             colors = np.ones_like(points) * 128
-            if "red" in vertex.dtype.names:
-                colors[:, 0] = vertex["red"]
-                colors[:, 1] = vertex["green"]
-                colors[:, 2] = vertex["blue"]
+            # Check for color fields
+            dtype_names = vertex_data.dtype.names if hasattr(vertex_data.dtype, 'names') and vertex_data.dtype.names else []
+            if "red" in dtype_names:
+                colors[:, 0] = vertex_data["red"]
+                colors[:, 1] = vertex_data["green"]
+                colors[:, 2] = vertex_data["blue"]
 
             # Downsample if too many points
             max_points = 100000
@@ -265,7 +274,8 @@ class Spann3RReconstructor:
                 colors = colors[indices]
 
             return {"points": points.tolist(), "colors": colors.astype(np.uint8).tolist()}
-        except ImportError:
+        except Exception as e:
+            logger.warning("Failed to load PLY with plyfile, trying simple parser: %s", e)
             # Simple PLY parser without plyfile dependency
             return self._load_ply_simple(ply_path)
 
