@@ -145,6 +145,7 @@ class Spann3RReconstructor:
         cmd = [
             "python", str(demo_script),
             "--demo_path", str(input_dir),
+            "--save_path", str(output_dir),
             "--kf_every", str(1),  # Already sampled, use all provided frames
             "--save_ori",
         ]
