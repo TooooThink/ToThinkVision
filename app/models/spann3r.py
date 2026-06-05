@@ -169,6 +169,17 @@ class Spann3RReconstructor:
         except Exception as e:
             raise RuntimeError(f"Spann3R error: {e}")
 
+        # Spann3R saves output to workspace/demo_name/, where demo_name is the last part of demo_path
+        # We passed --demo_path as input_dir, so output is in output_dir/input/
+        demo_name = input_dir.name
+        actual_output_dir = output_dir / demo_name
+
+        if actual_output_dir.exists():
+            logger.info("Spann3R output found in subdirectory: %s", actual_output_dir)
+            output_dir = actual_output_dir
+        else:
+            logger.warning("Expected Spann3R output in %s, checking parent directory", actual_output_dir)
+
         # Log what files were generated
         logger.info("Spann3R output directory: %s", output_dir)
         all_files = list(output_dir.rglob("*"))
