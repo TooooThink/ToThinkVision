@@ -112,7 +112,7 @@ class Spann3RReconstructor:
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="spann3r_"))
 
-        output_dir = Path(output_dir)
+        output_dir = Path(output_dir).resolve()  # Convert to absolute path
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Prepare input directory with sampled frames
