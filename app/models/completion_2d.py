@@ -11,6 +11,7 @@ returns the input unchanged.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 
