@@ -169,12 +169,19 @@ class Spann3RReconstructor:
         except Exception as e:
             raise RuntimeError(f"Spann3R error: {e}")
 
+        # Log what files were generated
+        logger.info("Spann3R output directory: %s", output_dir)
+        all_files = list(output_dir.rglob("*"))
+        logger.info("Spann3R generated %d files: %s",
+                   len(all_files),
+                   [f.name for f in all_files[:20]])  # Show first 20 files
+
         # Parse outputs
         pointcloud = self._load_pointcloud(output_dir)
         camera_poses = self._load_camera_poses(output_dir, sample_interval)
 
         if pointcloud is None or camera_poses is None:
-            raise RuntimeError("Spann3R produced no valid output")
+            raise RuntimeError(f"Spann3R produced no valid output (pointcloud={pointcloud is not None}, camera_poses={camera_poses is not None})")
 
         return pointcloud, camera_poses
 
@@ -187,25 +194,36 @@ class Spann3RReconstructor:
             candidates = list(output_dir.rglob("transform.json"))
             if candidates:
                 transform_path = candidates[0]
+                logger.info("Found transform.json in subdirectory: %s", transform_path)
 
         if transform_path.exists():
             try:
                 with open(transform_path) as f:
                     transform_data = json.load(f)
+                logger.info("Successfully loaded transform.json")
                 return self._parse_nerfstudio_pointcloud(transform_data, output_dir)
             except Exception as e:
                 logger.warning("Failed to parse transform.json: %s", e)
+        else:
+            logger.warning("No transform.json found in %s", output_dir)
 
         # Try .ply file
         ply_files = list(output_dir.rglob("*.ply"))
         if ply_files:
+            logger.info("Found %d PLY files, trying first: %s", len(ply_files), ply_files[0])
             try:
-                return self._load_ply(ply_files[0])
+                result = self._load_ply(ply_files[0])
+                if result:
+                    logger.info("Successfully loaded PLY with %d points", len(result["points"]))
+                return result
             except Exception as e:
                 logger.warning("Failed to load PLY: %s", e)
+        else:
+            logger.warning("No PLY files found in %s", output_dir)
 
         # Try numpy point cloud
         npz_files = list(output_dir.rglob("*.npz"))
+        logger.info("Found %d NPZ files", len(npz_files))
         for npz_file in npz_files:
             try:
                 data = np.load(npz_file)
@@ -213,10 +231,12 @@ class Spann3RReconstructor:
                     pts_key = "points" if "points" in data else "pts3d"
                     points = data[pts_key]
                     colors = data.get("colors", np.ones_like(points) * 128)
+                    logger.info("Loaded NPZ with %d points", len(points))
                     return {"points": points.tolist(), "colors": colors.tolist()}
             except Exception:
                 continue
 
+        logger.error("No valid point cloud found in %s", output_dir)
         return None
 
     def _parse_nerfstudio_pointcloud(
@@ -346,27 +366,36 @@ class Spann3RReconstructor:
             candidates = list(output_dir.rglob("transform.json"))
             if candidates:
                 transform_path = candidates[0]
+                logger.info("Found transform.json in subdirectory: %s", transform_path)
 
         if transform_path.exists():
             try:
                 with open(transform_path) as f:
                     transform_data = json.load(f)
-                return self._parse_nerfstudio_poses(transform_data, sample_interval)
+                poses = self._parse_nerfstudio_poses(transform_data, sample_interval)
+                if poses:
+                    logger.info("Successfully loaded %d camera poses from transform.json", len(poses))
+                return poses
             except Exception as e:
                 logger.warning("Failed to parse camera poses from transform.json: %s", e)
+        else:
+            logger.warning("No transform.json found for camera poses in %s", output_dir)
 
         # Try numpy camera data
         npz_files = list(output_dir.rglob("*.npz"))
+        logger.info("Found %d NPZ files for camera poses", len(npz_files))
         for npz_file in npz_files:
             try:
                 data = np.load(npz_file, allow_pickle=True)
                 if "poses" in data or "camera_poses" in data:
                     poses_key = "poses" if "poses" in data else "camera_poses"
                     poses_arr = data[poses_key]
+                    logger.info("Loading camera poses from NPZ key: %s", poses_key)
                     return self._array_to_poses(poses_arr, sample_interval)
             except Exception:
                 continue
 
+        logger.error("No valid camera poses found in %s", output_dir)
         return None
 
     def _parse_nerfstudio_poses(
