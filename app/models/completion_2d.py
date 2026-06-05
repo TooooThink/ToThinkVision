@@ -30,6 +30,39 @@ class Completion2D:
 
     def _init_model(self):
         """Load LaMa model."""
+        from app.config import settings
+        cache = settings.model_cache_dir
+
+        # Try loading original LaMa from local cache
+        lama_path = cache / "lama" / "big-lama.pt"
+        if lama_path.exists():
+            try:
+                import torch
+                self.model = torch.jit.load(str(lama_path))
+                self.model.to(self.device)
+                self.model.eval()
+                self._backend = "lama_original"
+                logger.info("Completion2D loaded: LaMa original weights from %s", lama_path)
+                return
+            except Exception as e:
+                logger.info(f"LaMa original load failed ({e}), trying lama-cleaner...")
+
+        # Try loading LaMa from lama-cleaner package
+        try:
+            from lama_cleaner.model_manager import ModelManager
+            from lama_cleaner.schema import Config as LamaConfig
+
+            self.lama_model = ModelManager(
+                model_name="lama",
+                device=self.device,
+            )
+            self._backend = "lama_direct"
+            self.model = self.lama_model
+            logger.info("Completion2D loaded: LaMa via lama-cleaner")
+            return
+        except Exception as e:
+            logger.info(f"LaMa direct load failed ({e}), trying HuggingFace...")
+
         # Try loading LaMa from HuggingFace transformers
         try:
             import torch
@@ -45,23 +78,7 @@ class Completion2D:
             logger.info("Completion2D loaded: LaMa via transformers")
             return
         except Exception as e:
-            logger.info(f"LaMa load failed ({e}), trying direct load...")
-
-        # Try direct LaMa from lama-cleaner package
-        try:
-            from lama_cleaner.model_manager import ModelManager
-            from lama_cleaner.schema import Config as LamaConfig
-
-            self.lama_model = ModelManager(
-                model_name="lama",
-                device=self.device,
-            )
-            self._backend = "lama_direct"
-            self.model = self.lama_model
-            logger.info("Completion2D loaded: LaMa via lama-cleaner")
-            return
-        except Exception as e:
-            logger.info(f"LaMa direct load failed ({e})")
+            logger.info(f"LaMa HuggingFace load failed ({e})")
 
         logger.warning("LaMa not available, 2D completion disabled")
 
@@ -89,6 +106,8 @@ class Completion2D:
             return self._complete_lama_direct(image, partial_mask)
         elif self._backend == "lama":
             return self._complete_lama_transformers(image, partial_mask)
+        elif self._backend == "lama_original":
+            return self._complete_lama_original(image, partial_mask)
 
         return image, partial_mask
 
@@ -117,6 +136,37 @@ class Completion2D:
         completed_mask[partial_mask == 1] = 1
         # The inpainted region is now part of the "object"
         completed_mask[inpaint_mask > 0] = 1
+
+        return completed_image, completed_mask
+
+    def _complete_lama_original(
+        self,
+        image: np.ndarray,
+        partial_mask: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Complete using original LaMa PyTorch JIT model."""
+        import torch
+
+        h, w = image.shape[:2]
+
+        # Prepare image: (H, W, 3) -> (1, 3, H, W), normalized to [0, 1]
+        img_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+        img_tensor = img_tensor.to(self.device)
+
+        # Prepare mask: (H, W) -> (1, 1, H, W), 0=observed, 1=to_fill
+        mask_tensor = torch.from_numpy((partial_mask == 0).astype(np.float32)).unsqueeze(0).unsqueeze(0)
+        mask_tensor = mask_tensor.to(self.device)
+
+        # Run inference
+        with torch.no_grad():
+            result = self.model(img_tensor, mask_tensor)
+
+        # Convert result back to numpy: (1, 3, H, W) -> (H, W, 3)
+        result_np = result.squeeze(0).permute(1, 2, 0).cpu().numpy()
+        completed_image = (result_np * 255).clip(0, 255).astype(np.uint8)
+
+        # Completed mask: all pixels are now "object"
+        completed_mask = np.ones((h, w), dtype=np.uint8)
 
         return completed_image, completed_mask
 

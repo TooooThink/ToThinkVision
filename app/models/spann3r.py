@@ -372,13 +372,13 @@ class Spann3RReconstructor:
         self, output_dir: Path, sample_interval: int
     ) -> list[dict[str, Any]] | None:
         """Load camera poses from Spann3R output."""
-        # Try transform.json (Nerfstudio format)
-        transform_path = output_dir / "transform.json"
+        # Try transforms.json (Nerfstudio format) - note the 's' at the end
+        transform_path = output_dir / "transforms.json"
         if not transform_path.exists():
-            candidates = list(output_dir.rglob("transform.json"))
+            candidates = list(output_dir.rglob("transforms.json"))
             if candidates:
                 transform_path = candidates[0]
-                logger.info("Found transform.json in subdirectory: %s", transform_path)
+                logger.info("Found transforms.json in subdirectory: %s", transform_path)
 
         if transform_path.exists():
             try:
@@ -386,12 +386,12 @@ class Spann3RReconstructor:
                     transform_data = json.load(f)
                 poses = self._parse_nerfstudio_poses(transform_data, sample_interval)
                 if poses:
-                    logger.info("Successfully loaded %d camera poses from transform.json", len(poses))
+                    logger.info("Successfully loaded %d camera poses from transforms.json", len(poses))
                 return poses
             except Exception as e:
-                logger.warning("Failed to parse camera poses from transform.json: %s", e)
+                logger.warning("Failed to parse camera poses from transforms.json: %s", e)
         else:
-            logger.warning("No transform.json found for camera poses in %s", output_dir)
+            logger.warning("No transforms.json found for camera poses in %s", output_dir)
 
         # Try numpy camera data
         npz_files = list(output_dir.rglob("*.npz"))
