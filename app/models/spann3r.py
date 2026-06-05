@@ -172,9 +172,10 @@ class Spann3RReconstructor:
         # Log what files were generated
         logger.info("Spann3R output directory: %s", output_dir)
         all_files = list(output_dir.rglob("*"))
-        logger.info("Spann3R generated %d files: %s",
-                   len(all_files),
-                   [f.name for f in all_files[:20]])  # Show first 20 files
+        all_files = [f for f in all_files if f.is_file()]  # Only files
+        logger.info("Spann3R generated %d files:", len(all_files))
+        for f in all_files:
+            logger.info("  - %s (%.2f MB)", f.relative_to(output_dir), f.stat().st_size / 1024 / 1024)
 
         # Parse outputs
         pointcloud = self._load_pointcloud(output_dir)
