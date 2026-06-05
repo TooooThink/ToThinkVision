@@ -149,16 +149,17 @@ class Completion2D:
 
         h, w = image.shape[:2]
 
-        # Prepare image: (H, W, 3) -> (1, 3, H, W), normalized to [0, 1]
+        # Prepare image: (H, W, 3) -> (1, 3, H, W), normalized to [0, 1], forced to float32
+        # LaMa uses FFT which doesn't support BFloat16 on A100, so explicit float32 is needed
         img_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-        img_tensor = img_tensor.to(self.device)
+        img_tensor = img_tensor.to(self.device, dtype=torch.float32)
 
         # Prepare mask: (H, W) -> (1, 1, H, W), 0=observed, 1=to_fill
         mask_tensor = torch.from_numpy((partial_mask == 0).astype(np.float32)).unsqueeze(0).unsqueeze(0)
-        mask_tensor = mask_tensor.to(self.device)
+        mask_tensor = mask_tensor.to(self.device, dtype=torch.float32)
 
-        # Run inference
-        with torch.no_grad():
+        # Run inference with autocast disabled (FFT doesn't support BF16)
+        with torch.no_grad(), torch.amp.autocast('cuda', enabled=False):
             result = self.model(img_tensor, mask_tensor)
 
         # Convert result back to numpy: (1, 3, H, W) -> (H, W, 3)
