@@ -199,25 +199,25 @@ class Spann3RReconstructor:
 
     def _load_pointcloud(self, output_dir: Path) -> dict[str, Any] | None:
         """Load point cloud from Spann3R output."""
-        # Try transform.json first (Nerfstudio-compatible format)
-        transform_path = output_dir / "transform.json"
+        # Try transforms.json first (Nerfstudio-compatible format) - note the 's'
+        transform_path = output_dir / "transforms.json"
         if not transform_path.exists():
             # Look in subdirectories
-            candidates = list(output_dir.rglob("transform.json"))
+            candidates = list(output_dir.rglob("transforms.json"))
             if candidates:
                 transform_path = candidates[0]
-                logger.info("Found transform.json in subdirectory: %s", transform_path)
+                logger.info("Found transforms.json in subdirectory: %s", transform_path)
 
         if transform_path.exists():
             try:
                 with open(transform_path) as f:
                     transform_data = json.load(f)
-                logger.info("Successfully loaded transform.json")
+                logger.info("Successfully loaded transforms.json")
                 return self._parse_nerfstudio_pointcloud(transform_data, output_dir)
             except Exception as e:
-                logger.warning("Failed to parse transform.json: %s", e)
+                logger.warning("Failed to parse transforms.json: %s", e)
         else:
-            logger.warning("No transform.json found in %s", output_dir)
+            logger.warning("No transforms.json found in %s", output_dir)
 
         # Try .ply file
         ply_files = list(output_dir.rglob("*.ply"))

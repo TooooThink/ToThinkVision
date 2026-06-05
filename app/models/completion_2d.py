@@ -51,8 +51,7 @@ class Completion2D:
         # Try loading LaMa from lama-cleaner package
         try:
             from lama_cleaner.model_manager import ModelManager
-            from lama_cleaner.schema import Config as LamaConfig
-
+            logger.info("lama-cleaner imported, initializing model...")
             self.lama_model = ModelManager(
                 model_name="lama",
                 device=self.device,
@@ -62,7 +61,7 @@ class Completion2D:
             logger.info("Completion2D loaded: LaMa via lama-cleaner")
             return
         except Exception as e:
-            logger.info(f"LaMa direct load failed ({e}), trying HuggingFace...")
+            logger.warning(f"LaMa via lama-cleaner failed: {e}", exc_info=True)
 
         # Try loading LaMa from HuggingFace transformers
         try:
