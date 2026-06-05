@@ -31,7 +31,7 @@ class Completion2D:
     def _init_model(self):
         """Load LaMa model."""
         from app.config import settings
-        cache = settings.model_cache_dir
+        cache = Path(settings.model_cache_dir)
 
         # Try loading original LaMa from local cache
         lama_path = cache / "lama" / "big-lama.pt"
