@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ttv_real
 #SBATCH --partition=a100
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=180G
 #SBATCH --time=03:00:00
