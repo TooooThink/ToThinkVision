@@ -10,6 +10,7 @@ GitHub: https://github.com/RuijieZhu94/ObjectGS
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -71,6 +72,118 @@ class ObjectGSPipeline:
 
         return None
 
+    def _run_colmap_for_scene(
+        self, scene_dir: Path, frame_paths: list[Path]
+    ) -> None:
+        """Run COLMAP on scene images to produce sparse reconstruction.
+
+        ObjectGS requires pre-computed COLMAP output (cameras, images, points3D)
+        in ``scene_dir/sparse/0/``.  This method runs the full COLMAP SfM pipeline
+        (feature extraction → matching → sparse reconstruction) and produces that
+        output automatically.
+
+        Args:
+            scene_dir: directory containing symlinked images (e.g. 000000.jpg …)
+            frame_paths: original image file paths (used to derive absolute symlinks
+                so COLMAP can read images regardless of working directory)
+        """
+        sparse_dir = scene_dir / "sparse"
+        sparse_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            subprocess.run(
+                ["colmap", "help"],
+                capture_output=True,
+                timeout=5,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            raise RuntimeError(
+                "COLMAP not found. Install COLMAP to use ObjectGS: "
+                "https://colmap.github.io/install.html"
+            )
+
+        # COLMAP reads images via --image_path (scene_dir), where absolute
+        # symlinks ensure images are found regardless of working directory.
+        db_path = sparse_dir / "database.db"
+
+        logger.info("Running COLMAP feature extraction on %d images…", len(frame_paths))
+        subprocess.run(
+            [
+                "colmap", "feature_extractor",
+                "--database_path", str(db_path),
+                "--image_path", str(scene_dir),
+                "--ImageReader.camera_model", "PINHOLE",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=600,
+        )
+
+        logger.info("Running COLMAP exhaustive matching…")
+        subprocess.run(
+            [
+                "colmap", "exhaustive_matcher",
+                "--database_path", str(db_path),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=600,
+        )
+
+        logger.info("Running COLMAP sparse reconstruction…")
+        subprocess.run(
+            [
+                "colmap", "mapper",
+                "--database_path", str(db_path),
+                "--image_path", str(scene_dir),
+                "--output_path", str(sparse_dir),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=1200,
+        )
+
+        # COLMAP mapper creates sparse/0/, sparse/1/, etc.
+        model_dir = sparse_dir / "0"
+        if not model_dir.exists():
+            # Fallback: some COLMAP versions output directly to sparse/
+            if (sparse_dir / "cameras.txt").exists() or (sparse_dir / "cameras.bin").exists():
+                model_dir.mkdir(exist_ok=True)
+                for f in sparse_dir.iterdir():
+                    if f.is_file() and f.suffix in (".txt", ".bin") and f.name != "database.db":
+                        shutil.move(str(f), str(model_dir / f.name))
+            else:
+                raise RuntimeError(
+                    "COLMAP produced no sparse reconstruction. "
+                    "Ensure images have sufficient overlap and texture."
+                )
+
+        logger.info("COLMAP sparse reconstruction saved to %s", model_dir)
+
+    def _patch_training_scripts(self) -> None:
+        """Patch hardcoded dataset paths in ObjectGS training shell scripts.
+
+        The ObjectGS repo ships with ``train_3d.sh`` / ``train_2d.sh`` that
+        contain a hardcoded ``datasets/replica/scene`` path.  This replaces
+        that path with ``"$1"`` so the scripts honour the data directory we
+        pass as the first positional argument.
+        """
+        for script_name in ("train_3d.sh", "train_2d.sh"):
+            script_path = self.repo_path / script_name
+            if not script_path.exists():
+                continue
+
+            content = script_path.read_text()
+            if "datasets/replica/scene" not in content:
+                continue  # already patched or uses a variable
+
+            patched = content.replace("datasets/replica/scene", '"$1"')
+            script_path.write_text(patched)
+            logger.info(
+                "Patched hardcoded 'datasets/replica/scene' → \"$1\" in %s",
+                script_path,
+            )
+
     def train(
         self,
         frame_dir: Path,
@@ -123,6 +236,13 @@ class ObjectGSPipeline:
             dst = scene_dir / f"{i:06d}.jpg"
             if not dst.exists():
                 dst.symlink_to(fp.resolve())
+
+        # Run COLMAP to estimate camera poses and produce sparse reconstruction.
+        # ObjectGS requires pre-computed COLMAP output at scene_dir/sparse/0/.
+        self._run_colmap_for_scene(scene_dir, frame_paths)
+
+        # Patch hardcoded dataset paths in training scripts
+        self._patch_training_scripts()
 
         # Run training
         script = "train_2d.sh" if use_2dgs else "train_3d.sh"
