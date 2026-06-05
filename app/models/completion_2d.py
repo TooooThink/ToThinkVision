@@ -34,9 +34,9 @@ class Completion2D:
         from app.config import settings
         cache = Path(settings.model_cache_dir)
 
-        # Try loading original LaMa from local cache
+        # Try loading original LaMa from local cache (JIT format)
         lama_path = cache / "lama" / "big-lama.pt"
-        if lama_path.exists():
+        if lama_path.exists() and lama_path.stat().st_size > 1000:
             try:
                 import torch
                 self.model = torch.jit.load(str(lama_path))
@@ -46,9 +46,9 @@ class Completion2D:
                 logger.info("Completion2D loaded: LaMa original weights from %s", lama_path)
                 return
             except Exception as e:
-                logger.info(f"LaMa original load failed ({e}), trying lama-cleaner...")
+                logger.info(f"LaMa original load failed ({e})")
 
-        # Try loading LaMa from lama-cleaner package
+        # Try loading from lama-cleaner (uses locally cached JIT if available)
         try:
             from lama_cleaner.model_manager import ModelManager
             logger.info("lama-cleaner imported, initializing model...")
@@ -61,7 +61,7 @@ class Completion2D:
             logger.info("Completion2D loaded: LaMa via lama-cleaner")
             return
         except Exception as e:
-            logger.warning(f"LaMa via lama-cleaner failed: {e}", exc_info=True)
+            logger.info(f"LaMa via lama-cleaner failed: {e}")
 
         # Try loading LaMa from HuggingFace transformers
         try:
