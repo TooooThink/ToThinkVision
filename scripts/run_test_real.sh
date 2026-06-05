@@ -125,58 +125,58 @@ from app.exporters.psd_exporter import PSDExporter
 from app.schemas import ExportFormat
 
 # ── Test 1: Image — 2D path (detect + segment + LaMa completion + PSD) ──
-if os.path.exists('test_input.png'):
-    print('='*60)
-    print('TEST 1: Image — 2D path — test_input.png')
-    print('='*60)
-    start = time.time()
+# if os.path.exists('test_input.png'):
+#     print('='*60)
+#     print('TEST 1: Image — 2D path — test_input.png')
+#     print('='*60)
+#     start = time.time()
 
-    # 2D-only config: skip depth, 3D reconstruction, mesh
-    config_2d = PipelineConfig(
-        enable_sam3=True,
-        enable_grounding_dino=True,
-        enable_omniparser=False,
-        enable_depth_pro=False,
-        enable_mast3r=False,
-        enable_3d_reconstruction=False,
-        enable_gaussian_splatting=False,
-        enable_completion_2d=True,   # LaMa inpainting for occluded regions
-        enable_completion_3d=False,
-        mode='general',
-    )
-    result = process_file(Path('test_input.png'), mode='image', config=config_2d)
-    elapsed = time.time() - start
+#     # 2D-only config: skip depth, 3D reconstruction, mesh
+#     config_2d = PipelineConfig(
+#         enable_sam3=True,
+#         enable_grounding_dino=True,
+#         enable_omniparser=False,
+#         enable_depth_pro=False,
+#         enable_mast3r=False,
+#         enable_3d_reconstruction=False,
+#         enable_gaussian_splatting=False,
+#         enable_completion_2d=True,   # LaMa inpainting for occluded regions
+#         enable_completion_3d=False,
+#         mode='general',
+#     )
+#     result = process_file(Path('test_input.png'), mode='image', config=config_2d)
+#     elapsed = time.time() - start
 
-    print(f'Duration: {elapsed:.1f}s')
-    print(f'Objects: {len(result.objects)}')
-    for obj in result.objects:
-        print(f'  [{obj.id}] {obj.label}')
-        print(f'    bbox: {obj.bbox}')
-        if obj.mask_base64:
-            print(f'    mask: yes (base64, {len(obj.mask_base64)} chars)')
-        if obj.crop_png_path:
-            print(f'    crop_png: {obj.crop_png_path}')
-        elif obj.crop_image_base64:
-            print(f'    crop: yes (base64, {len(obj.crop_image_base64)} chars)')
-        if obj.temporal and obj.temporal.trajectory:
-            print(f'    trajectory: {len(obj.temporal.trajectory)} frames')
+#     print(f'Duration: {elapsed:.1f}s')
+#     print(f'Objects: {len(result.objects)}')
+#     for obj in result.objects:
+#         print(f'  [{obj.id}] {obj.label}')
+#         print(f'    bbox: {obj.bbox}')
+#         if obj.mask_base64:
+#             print(f'    mask: yes (base64, {len(obj.mask_base64)} chars)')
+#         if obj.crop_png_path:
+#             print(f'    crop_png: {obj.crop_png_path}')
+#         elif obj.crop_image_base64:
+#             print(f'    crop: yes (base64, {len(obj.crop_image_base64)} chars)')
+#         if obj.temporal and obj.temporal.trajectory:
+#             print(f'    trajectory: {len(obj.temporal.trajectory)} frames')
 
-    print()
-    print('── Exports ──')
+#     print()
+#     print('── Exports ──')
 
-    print('Exporting PSD (static, each object = layer)...')
-    t0 = time.time()
-    p = PSDExporter(fmt=ExportFormat.PSD_STATIC).export(result)
-    print(f'  -> {p} ({time.time()-t0:.1f}s)')
+#     print('Exporting PSD (static, each object = layer)...')
+#     t0 = time.time()
+#     p = PSDExporter(fmt=ExportFormat.PSD_STATIC).export(result)
+#     print(f'  -> {p} ({time.time()-t0:.1f}s)')
 
-    print(f'\\nImage 2D test DONE in {elapsed:.1f}s')
+#     print(f'\\nImage 2D test DONE in {elapsed:.1f}s')
 
-    # Clean up models from Test 1 before Test 2
-    from app.pipeline import cleanup_all_models
-    print('\\nCleaning up GPU memory after Test 1...')
-    cleanup_all_models()
-else:
-    print('SKIPPED: test_input.png not found')
+#     # Clean up models from Test 1 before Test 2
+#     from app.pipeline import cleanup_all_models
+#     print('\\nCleaning up GPU memory after Test 1...')
+#     cleanup_all_models()
+# else:
+#     print('SKIPPED: test_input.png not found')
 
 # ── Test 2: Video — 3D path (full pipeline) ──
 if os.path.exists('test_input.mp4'):
