@@ -148,6 +148,13 @@ class Completion2D:
         import torch
 
         h, w = image.shape[:2]
+        # LaMa uses FFT, requires dimensions divisible by 8
+        pad_mod = 8
+        pad_h = (pad_mod - h % pad_mod) % pad_mod
+        pad_w = (pad_mod - w % pad_mod) % pad_mod
+        if pad_h > 0 or pad_w > 0:
+            image = np.pad(image, ((0, pad_h), (0, pad_w), (0, 0)), mode='edge')
+            partial_mask = np.pad(partial_mask, ((0, pad_h), (0, pad_w)), mode='edge')
 
         # Prepare image: (H, W, 3) -> (1, 3, H, W), normalized to [0, 1], forced to float32
         # LaMa uses FFT which doesn't support BFloat16 on A100, so explicit float32 is needed
@@ -164,6 +171,8 @@ class Completion2D:
 
         # Convert result back to numpy: (1, 3, H, W) -> (H, W, 3)
         result_np = result.squeeze(0).permute(1, 2, 0).cpu().numpy()
+        # Crop back to original size
+        result_np = result_np[:h, :w, :]
         completed_image = (result_np * 255).clip(0, 255).astype(np.uint8)
 
         # Completed mask: all pixels are now "object"
