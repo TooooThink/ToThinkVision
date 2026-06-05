@@ -40,6 +40,9 @@ set -e
 
 mkdir -p logs outputs
 
+# ── Clear stale __pycache__ (NFS caching on compute nodes can keep corrupted .pyc) ──
+find app/ -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
 # Force correct HF endpoint — hf-mirror.com doesn't resolve on compute nodes
 HF_ENDPOINT="https://huggingface.co"
 export HF_ENDPOINT
