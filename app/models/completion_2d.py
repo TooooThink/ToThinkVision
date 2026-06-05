@@ -53,7 +53,7 @@ class Completion2D:
             from lama_cleaner.model_manager import ModelManager
             logger.info("lama-cleaner imported, initializing model...")
             self.lama_model = ModelManager(
-                model_name="lama",
+                name="lama",
                 device=self.device,
             )
             self._backend = "lama_direct"
