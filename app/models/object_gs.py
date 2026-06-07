@@ -24,6 +24,25 @@ logger = logging.getLogger(__name__)
 # Headless environment for COLMAP on HPC/SSH nodes (no X11/Qt display)
 _COLMAP_ENV = os.environ.copy()
 _COLMAP_ENV.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Fix QStandardPaths error on SLURM nodes where /run/user/<uid> is not writable
+_xdg_dir = _COLMAP_ENV.get("XDG_RUNTIME_DIR", "")
+if not _xdg_dir or not os.path.isdir(_xdg_dir) or not os.access(_xdg_dir, os.W_OK):
+    _xdg_dir = f"/tmp/runtime-{os.getuid()}"
+    os.makedirs(_xdg_dir, mode=0o700, exist_ok=True)
+_COLMAP_ENV["XDG_RUNTIME_DIR"] = _xdg_dir
+
+
+def _is_colmap_opengl_error(stderr: str) -> bool:
+    """Return True if the COLMAP stderr indicates an OpenGL/context failure.
+
+    On headless HPC nodes without a GL context (no Xvfb, no EGL), COLMAP's
+    GPU SIFT extraction aborts with ``Check failed: context_.create()``.
+    """
+    if not stderr:
+        return False
+    markers = ("context_.create()", "OpenGLContextManager", "opengl_utils",
+               "Failed to create OpenGL", "QStandardPaths")
+    return any(m in stderr for m in markers)
 
 
 class ObjectGSPipeline:
@@ -129,9 +148,36 @@ class ObjectGSPipeline:
                 env=_COLMAP_ENV,
             )
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                f"COLMAP feature_extractor failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
-            ) from e
+            if _is_colmap_opengl_error(e.stderr):
+                logger.warning(
+                    "COLMAP GPU feature extraction failed (no OpenGL context). "
+                    "Falling back to CPU SIFT extraction."
+                )
+                try:
+                    subprocess.run(
+                        [
+                            "colmap", "feature_extractor",
+                            "--database_path", str(db_path),
+                            "--image_path", str(scene_dir),
+                            "--ImageReader.camera_model", "PINHOLE",
+                            "--ImageReader.single_camera", "1",
+                            "--SiftExtraction.use_gpu", "0",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=1200,   # CPU is slower
+                        env=_COLMAP_ENV,
+                    )
+                except subprocess.CalledProcessError as e2:
+                    raise RuntimeError(
+                        f"COLMAP feature_extractor (CPU) failed (exit {e2.returncode}):\n"
+                        f"{e2.stderr[-2000:]}"
+                    ) from e2
+            else:
+                raise RuntimeError(
+                    f"COLMAP feature_extractor failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
+                ) from e
 
         logger.info("Running COLMAP exhaustive matching…")
         try:
@@ -147,9 +193,33 @@ class ObjectGSPipeline:
                 env=_COLMAP_ENV,
             )
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                f"COLMAP exhaustive_matcher failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
-            ) from e
+            if _is_colmap_opengl_error(e.stderr):
+                logger.warning(
+                    "COLMAP GPU matching failed (no OpenGL context). "
+                    "Falling back to CPU matching."
+                )
+                try:
+                    subprocess.run(
+                        [
+                            "colmap", "exhaustive_matcher",
+                            "--database_path", str(db_path),
+                            "--SiftMatching.use_gpu", "0",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=1200,
+                        env=_COLMAP_ENV,
+                    )
+                except subprocess.CalledProcessError as e2:
+                    raise RuntimeError(
+                        f"COLMAP exhaustive_matcher (CPU) failed (exit {e2.returncode}):\n"
+                        f"{e2.stderr[-2000:]}"
+                    ) from e2
+            else:
+                raise RuntimeError(
+                    f"COLMAP exhaustive_matcher failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
+                ) from e
 
         logger.info("Running COLMAP sparse reconstruction…")
         try:

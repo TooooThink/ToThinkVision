@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -23,6 +24,18 @@ from app.config import settings
 from app.utils.camera import estimate_intrinsics, rt_matrix_to_position, rt_matrix_to_quaternion
 
 logger = logging.getLogger(__name__)
+
+# Directory containing sitecustomize.py that patches torch.Tensor.__array__
+# for numpy 1.26+ compatibility (fixes SIGSEGV at demo.py:156)
+_SPANN3R_COMPAT_DIR = str(Path(__file__).parent / "_spann3r_compat")
+
+
+def _build_spann3r_env() -> dict[str, str]:
+    """Build subprocess env with PYTHONPATH including our torch/numpy compat patch."""
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = _SPANN3R_COMPAT_DIR + (os.pathsep + existing if existing else "")
+    return env
 
 
 class Spann3RReconstructor:
@@ -157,6 +170,7 @@ class Spann3RReconstructor:
                 capture_output=True,
                 text=True,
                 timeout=1800,  # 30 minute timeout
+                env=_build_spann3r_env(),  # inject PYTHONPATH with torch __array__ patch
             )
 
             if result.returncode != 0:

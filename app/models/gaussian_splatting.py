@@ -16,6 +16,21 @@ logger = logging.getLogger(__name__)
 # Headless environment for COLMAP on HPC/SSH nodes (no X11/Qt display)
 _COLMAP_ENV = os.environ.copy()
 _COLMAP_ENV.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Fix QStandardPaths error on SLURM nodes where /run/user/<uid> is not writable
+_xdg_dir = _COLMAP_ENV.get("XDG_RUNTIME_DIR", "")
+if not _xdg_dir or not os.path.isdir(_xdg_dir) or not os.access(_xdg_dir, os.W_OK):
+    _xdg_dir = f"/tmp/runtime-{os.getuid()}"
+    os.makedirs(_xdg_dir, mode=0o700, exist_ok=True)
+_COLMAP_ENV["XDG_RUNTIME_DIR"] = _xdg_dir
+
+
+def _is_colmap_opengl_error(stderr: str) -> bool:
+    """Return True if the COLMAP stderr indicates an OpenGL/context failure."""
+    if not stderr:
+        return False
+    markers = ("context_.create()", "OpenGLContextManager", "opengl_utils",
+               "Failed to create OpenGL", "QStandardPaths")
+    return any(m in stderr for m in markers)
 
 _gs_pipeline = None
 
@@ -339,23 +354,40 @@ class GaussianSplatPipeline:
         sparse_dir = output_dir / "sparse"
         sparse_dir.mkdir(exist_ok=True)
 
+        def _run_colmap_step(cmd: list[str], timeout: int, gpu_flag: str | None = None) -> None:
+            """Run a COLMAP subcommand; on OpenGL failure retry with CPU."""
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, text=True,
+                               timeout=timeout, env=_COLMAP_ENV)
+            except subprocess.CalledProcessError as e:
+                if gpu_flag and _is_colmap_opengl_error(e.stderr):
+                    logger.warning(
+                        "COLMAP GPU %s failed (no OpenGL context). Falling back to CPU.",
+                        gpu_flag.split(".")[0],   # e.g. "SiftExtraction"
+                    )
+                    cpu_cmd = cmd + [gpu_flag, "0"]
+                    subprocess.run(cpu_cmd, check=True, capture_output=True, text=True,
+                                   timeout=timeout * 2, env=_COLMAP_ENV)
+                else:
+                    raise
+
         try:
             # Feature extraction
-            subprocess.run([
+            _run_colmap_step([
                 "colmap", "feature_extractor",
                 "--database_path", str(database),
                 "--image_path", str(frames_dir),
                 "--ImageReader.camera_model", "PINHOLE",
                 "--ImageReader.single_camera", "1",
-            ], check=True, capture_output=True, text=True, timeout=120, env=_COLMAP_ENV)
+            ], timeout=120, gpu_flag="--SiftExtraction.use_gpu")
 
             # Feature matching
-            subprocess.run([
+            _run_colmap_step([
                 "colmap", "exhaustive_matcher",
                 "--database_path", str(database),
-            ], check=True, capture_output=True, text=True, timeout=300, env=_COLMAP_ENV)
+            ], timeout=300, gpu_flag="--SiftMatching.use_gpu")
 
-            # Sparse reconstruction
+            # Sparse reconstruction (no GPU SIFT, no fallback needed)
             subprocess.run([
                 "colmap", "mapper",
                 "--database_path", str(database),
