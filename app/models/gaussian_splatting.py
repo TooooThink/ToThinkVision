@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,10 @@ import numpy as np
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Headless environment for COLMAP on HPC/SSH nodes (no X11/Qt display)
+_COLMAP_ENV = os.environ.copy()
+_COLMAP_ENV.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 _gs_pipeline = None
 
@@ -341,13 +346,14 @@ class GaussianSplatPipeline:
                 "--database_path", str(database),
                 "--image_path", str(frames_dir),
                 "--ImageReader.camera_model", "PINHOLE",
-            ], check=True, capture_output=True, timeout=120)
+                "--ImageReader.single_camera", "1",
+            ], check=True, capture_output=True, text=True, timeout=120, env=_COLMAP_ENV)
 
             # Feature matching
             subprocess.run([
                 "colmap", "exhaustive_matcher",
                 "--database_path", str(database),
-            ], check=True, capture_output=True, timeout=300)
+            ], check=True, capture_output=True, text=True, timeout=300, env=_COLMAP_ENV)
 
             # Sparse reconstruction
             subprocess.run([
@@ -355,7 +361,7 @@ class GaussianSplatPipeline:
                 "--database_path", str(database),
                 "--image_path", str(frames_dir),
                 "--output_path", str(sparse_dir),
-            ], check=True, capture_output=True, timeout=600)
+            ], check=True, capture_output=True, text=True, timeout=600, env=_COLMAP_ENV)
 
             # Export to text format
             model_path = sparse_dir / "0"

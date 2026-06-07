@@ -10,6 +10,7 @@ GitHub: https://github.com/RuijieZhu94/ObjectGS
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -19,6 +20,10 @@ from typing import Any
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# Headless environment for COLMAP on HPC/SSH nodes (no X11/Qt display)
+_COLMAP_ENV = os.environ.copy()
+_COLMAP_ENV.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 class ObjectGSPipeline:
@@ -95,6 +100,7 @@ class ObjectGSPipeline:
                 ["colmap", "help"],
                 capture_output=True,
                 timeout=5,
+                env=_COLMAP_ENV,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             raise RuntimeError(
@@ -107,41 +113,63 @@ class ObjectGSPipeline:
         db_path = sparse_dir / "database.db"
 
         logger.info("Running COLMAP feature extraction on %d images…", len(frame_paths))
-        subprocess.run(
-            [
-                "colmap", "feature_extractor",
-                "--database_path", str(db_path),
-                "--image_path", str(scene_dir),
-                "--ImageReader.camera_model", "PINHOLE",
-            ],
-            check=True,
-            capture_output=True,
-            timeout=600,
-        )
+        try:
+            subprocess.run(
+                [
+                    "colmap", "feature_extractor",
+                    "--database_path", str(db_path),
+                    "--image_path", str(scene_dir),
+                    "--ImageReader.camera_model", "PINHOLE",
+                    "--ImageReader.single_camera", "1",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                env=_COLMAP_ENV,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"COLMAP feature_extractor failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
+            ) from e
 
         logger.info("Running COLMAP exhaustive matching…")
-        subprocess.run(
-            [
-                "colmap", "exhaustive_matcher",
-                "--database_path", str(db_path),
-            ],
-            check=True,
-            capture_output=True,
-            timeout=600,
-        )
+        try:
+            subprocess.run(
+                [
+                    "colmap", "exhaustive_matcher",
+                    "--database_path", str(db_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                env=_COLMAP_ENV,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"COLMAP exhaustive_matcher failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
+            ) from e
 
         logger.info("Running COLMAP sparse reconstruction…")
-        subprocess.run(
-            [
-                "colmap", "mapper",
-                "--database_path", str(db_path),
-                "--image_path", str(scene_dir),
-                "--output_path", str(sparse_dir),
-            ],
-            check=True,
-            capture_output=True,
-            timeout=1200,
-        )
+        try:
+            subprocess.run(
+                [
+                    "colmap", "mapper",
+                    "--database_path", str(db_path),
+                    "--image_path", str(scene_dir),
+                    "--output_path", str(sparse_dir),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=1200,
+                env=_COLMAP_ENV,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"COLMAP mapper failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
+            ) from e
 
         # COLMAP mapper creates sparse/0/, sparse/1/, etc.
         model_dir = sparse_dir / "0"

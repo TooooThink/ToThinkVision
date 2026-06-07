@@ -91,6 +91,7 @@ def cleanup_all_models():
     # Reset all global singletons
     from app.models import grounding_dino, sam3, depth_pro, strongsort_wrapper, mast3r, cotracker3
     from app.models import completion_2d, completion_3d, gaussian_splatting, omniparser
+    from app.models import spann3r, object_gs, shape_of_motion
 
     # GroundingDINO
     grounding_dino._detector = None
@@ -107,8 +108,20 @@ def cleanup_all_models():
     # 3D Reconstruction
     mast3r._reconstructor = None
 
+    # Spann3R
+    if hasattr(spann3r, '_spann3r'):
+        spann3r._spann3r = None
+
     # CoTracker3
     cotracker3._cotracker_predictor = None
+
+    # ObjectGS
+    if hasattr(object_gs, '_objectgs_pipeline'):
+        object_gs._objectgs_pipeline = None
+
+    # Shape of Motion
+    if hasattr(shape_of_motion, '_shape_of_motion'):
+        shape_of_motion._shape_of_motion = None
 
     # Completion models
     if hasattr(completion_2d, '_completion_2d'):
@@ -135,6 +148,38 @@ def cleanup_all_models():
         allocated = torch.cuda.memory_allocated() / 1024**3
         reserved = torch.cuda.memory_reserved() / 1024**3
         logger.info(f"All models cleaned up. GPU: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
+
+
+def _check_gpu_health():
+    """Verify GPU is in a usable state after subprocess failures.
+
+    A subprocess segfault (e.g. Spann3R) can corrupt the shared CUDA context.
+    This probes the GPU with a trivial allocation; if it fails, we force a
+    CUDA context reset so downstream models don't inherit a broken state.
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return
+        torch.cuda.synchronize()
+        # Tiny probe to verify CUDA context is intact
+        _probe = torch.zeros(1, device='cuda')
+        del _probe
+        torch.cuda.synchronize()
+        logger.info("GPU health check passed")
+    except Exception as e:
+        logger.warning("GPU health check failed (%s), attempting CUDA context reset…", e)
+        try:
+            import torch
+            # Reset CUDA context by clearing all cached allocations
+            torch.cuda.empty_cache()
+            # Re-initialize by allocating and freeing on device 0
+            _init = torch.zeros(1, device='cuda')
+            del _init
+            torch.cuda.synchronize()
+            logger.info("CUDA context reset complete")
+        except Exception as e2:
+            logger.error("CUDA context reset failed: %s. Subsequent GPU stages may fail.", e2)
 
 # Label classification
 UI_LABELS = {"button", "text", "input", "icon", "image", "navigation", "card", "slider", "toggle"}
@@ -598,6 +643,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 logger.info("Spann3R not available, trying MASt3R/VGGT")
         except Exception as e:
             logger.warning("Spann3R failed (%s), falling back to MASt3R/VGGT", e)
+            _check_gpu_health()
 
     # Try MASt3R/VGGT
     if reconstruction_backend == "none" and config.enable_mast3r:
@@ -683,6 +729,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                             len(objectgs_data.get("object_meshes", {})))
         except Exception as e:
             logger.warning("ObjectGS failed: %s", e)
+            _check_gpu_health()
 
     # ─── CoTracker3: Dense point tracking (optional) ─────────
     cotracker_data = None
@@ -734,6 +781,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 clear_gpu_memory()
         except Exception as e:
             logger.warning("CoTracker3 failed: %s", e)
+            _check_gpu_health()
 
     # ─── Stage 6: 4D Trajectory Extraction ───────────────────
     trajectories_4d = {}
@@ -780,6 +828,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                             len(trajectories_4d))
         except Exception as e:
             logger.warning("Shape of Motion failed: %s, falling back to ICP-based extraction", e)
+            _check_gpu_health()
 
     # Option B: ICP-based trajectory extraction (with CoTracker3 enhancement)
     if not trajectories_4d and config.enable_4d_trajectory and all_depth_maps and per_frame_obj_data and camera_poses:
@@ -822,6 +871,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             model_versions["gaussian_splatting_4d"] = "hexplane"
         except Exception as e:
             logger.warning("4D Gaussian Splatting failed: %s", e)
+            _check_gpu_health()
 
     # ─── Finalize objects ───────────────────────────────────
     # Compute velocity for tracked objects
