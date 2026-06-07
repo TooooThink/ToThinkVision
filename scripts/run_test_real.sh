@@ -72,6 +72,13 @@ echo "Python: $(which python)"
 echo "CUDA: $(python -c 'import torch; print(torch.version.cuda)' 2>/dev/null || echo 'N/A')"
 echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'N/A')"
 
+# ── Spann3R needs open3d (installed in base conda env, not in ttv) ──
+BASE_PYTHON="$(conda run -n base --no-capture-output which python 2>/dev/null)"
+if [ -n "$BASE_PYTHON" ] && [ "$BASE_PYTHON" != "$(which python)" ]; then
+    export SPANN3R_PYTHON="$BASE_PYTHON"
+    echo "Spann3R Python (base env with open3d): $SPANN3R_PYTHON"
+fi
+
 # Add PyTorch lib to LD_LIBRARY_PATH (needed for GroundingDINO _C extension)
 TORCH_LIB="$(python -c 'import torch; import os; print(os.path.join(os.path.dirname(torch.__file__), "lib"))' 2>/dev/null)"
 if [ -n "$TORCH_LIB" ] && [ -d "$TORCH_LIB" ]; then
