@@ -160,7 +160,31 @@ class Spann3RReconstructor:
             )
 
             if result.returncode != 0:
-                raise RuntimeError(f"Spann3R failed: {result.stderr}")
+                # Non-zero exit code may just be a warning (e.g. numpy DeprecationWarning).
+                # Check if output files were actually produced before declaring failure.
+                logger.warning("Spann3R exited with code %d, checking output...", result.returncode)
+                if result.stderr:
+                    # Filter out harmless warnings from stderr for logging
+                    stderr_lines = [l for l in result.stderr.strip().split("\n")
+                                    if not any(skip in l for skip in ("DeprecationWarning", "FutureWarning", "UserWarning"))]
+                    if stderr_lines:
+                        logger.warning("Spann3R stderr:\n%s", "\n".join(stderr_lines[:20]))
+
+                demo_name_check = input_dir.name
+                check_dir = output_dir / demo_name_check
+                has_output = (
+                    list(check_dir.rglob("*.ply"))
+                    or list(check_dir.rglob("*.npz"))
+                    or list(check_dir.rglob("transforms.json"))
+                    or list(output_dir.rglob("*.ply"))
+                    or list(output_dir.rglob("*.npz"))
+                )
+                if not has_output:
+                    raise RuntimeError(f"Spann3R failed (no output produced): {result.stderr[:500]}")
+                logger.info("Spann3R exited non-zero but output files found — continuing")
+            elif result.stderr:
+                # Log warnings even on success
+                logger.debug("Spann3R stderr: %s", result.stderr[:200])
 
         except subprocess.TimeoutExpired:
             raise RuntimeError("Spann3R timed out")
