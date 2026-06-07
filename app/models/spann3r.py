@@ -142,29 +142,13 @@ class Spann3RReconstructor:
             if not demo_script.exists():
                 raise RuntimeError("Spann3R demo script not found")
 
-        import os
-        python_exe = os.environ.get("SPANN3R_PYTHON", "python")
         cmd = [
-            python_exe, str(demo_script),
+            "python", str(demo_script),
             "--demo_path", str(input_dir),
             "--save_path", str(output_dir),
             "--kf_every", str(1),  # Already sampled, use all provided frames
             "--save_ori",
         ]
-
-        # If using a different Python (e.g. from a conda env with open3d),
-        # set up its environment so C++ shared libraries resolve correctly.
-        sub_env = os.environ.copy()
-        if python_exe != "python":
-            python_dir = Path(python_exe).resolve().parent
-            conda_prefix = python_dir.parent  # e.g. /path/to/anaconda3/envs/base
-            conda_bin = str(conda_prefix / "bin")
-            conda_lib = str(conda_prefix / "lib")
-            sub_env["PATH"] = conda_bin + ":" + sub_env.get("PATH", "")
-            existing_ld = sub_env.get("LD_LIBRARY_PATH", "")
-            sub_env["LD_LIBRARY_PATH"] = conda_lib + (":" + existing_ld if existing_ld else "")
-            sub_env["CONDA_PREFIX"] = str(conda_prefix)
-            logger.info("Spann3R subprocess using Python: %s (CONDA_PREFIX=%s)", python_exe, conda_prefix)
 
         try:
             result = subprocess.run(
@@ -173,7 +157,6 @@ class Spann3RReconstructor:
                 capture_output=True,
                 text=True,
                 timeout=1800,  # 30 minute timeout
-                env=sub_env,
             )
 
             if result.returncode != 0:
