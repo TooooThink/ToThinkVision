@@ -124,7 +124,7 @@ from app.schemas import PipelineConfig
 from app.exporters.psd_exporter import PSDExporter
 from app.schemas import ExportFormat
 
-── Test 1: Image — 2D path (detect + segment + LaMa completion + PSD) ──
+# ── Test 1: Image — 2D path (detect + segment + LaMa completion + PSD) ──
 if os.path.exists('test_input.png'):
     print('='*60)
     print('TEST 1: Image — 2D path — test_input.png')
@@ -178,7 +178,7 @@ if os.path.exists('test_input.png'):
 else:
     print('SKIPPED: test_input.png not found')
 
-── Test 2: Video — 3D path (full pipeline) ──
+# ── Test 2: Video — 3D path (full pipeline) ──
 if os.path.exists('test_input.mp4'):
     print()
     print('='*60)
