@@ -623,6 +623,15 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     logger.info("Clearing GPU memory before 3D reconstruction...")
     cleanup_all_models()
 
+    # Diagnostic: log GPU memory state after cleanup
+    import torch
+    if torch.cuda.is_available():
+        free, total = torch.cuda.mem_get_info()
+        logger.info(
+            "GPU after cleanup: %.1f GB free / %.1f GB total (%.1f%% free)",
+            free / 1024**3, total / 1024**3, free / total * 100,
+        )
+
     # Try Spann3R first if enabled (spatial memory for better long sequences)
     if config.enable_spann3r and config.enable_mast3r:
         try:
