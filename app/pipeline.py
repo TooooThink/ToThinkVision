@@ -726,7 +726,6 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
 
         gs_pipe = get_splat_pipeline()
         gs_data = gs_pipe.train(frame_dir, settings.output_dir / "gs_training")
-        del gs_pipe  # drop local ref so cleanup can reclaim GPU memory
 
     # ─── ObjectGS: Per-object 3D Gaussian Splatting (optional) ──
     objectgs_data = None
@@ -835,6 +834,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 model_versions["trajectory_4d"] = "shape_of_motion"
                 logger.info("Shape of Motion: extracted %d trajectories (end-to-end 4D)",
                             len(trajectories_4d))
+            del som_pipe  # not used after this point
         except Exception as e:
             logger.warning("Shape of Motion failed: %s, falling back to ICP-based extraction", e)
             _check_gpu_health()
@@ -855,6 +855,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             trajectory_backend = "icp_pca"
             model_versions["trajectory_4d"] = "icp_pca"
             logger.info("4D Trajectory (ICP): extracted %d object trajectories", len(trajectories_4d))
+            del traj_extractor
         except Exception as e:
             logger.warning("4D Trajectory extraction failed: %s", e)
 
