@@ -618,15 +618,10 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     camera_poses = []
     reconstruction_backend = "none"
 
-    # Clean up models no longer needed before loading 3D reconstruction
+    # Clean up ALL models (including global singletons) before loading 3D reconstruction.
+    # SAM3's global singleton holds ~28GB; just `del sam3` only removes the local reference.
     logger.info("Clearing GPU memory before 3D reconstruction...")
-    if 'sam3' in locals() and sam3 is not None:
-        del sam3
-    if 'depth_model' in locals() and depth_model is not None:
-        del depth_model
-    if 'tracker' in locals() and tracker is not None:
-        tracker = None
-    clear_gpu_memory()
+    cleanup_all_models()
 
     # Try Spann3R first if enabled (spatial memory for better long sequences)
     if config.enable_spann3r and config.enable_mast3r:
@@ -699,13 +694,9 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     # ─── 3D Gaussian Splatting (optional) ───────────────────
     gs_data = None
     if config.enable_gaussian_splatting:
-        # Clean up 3D reconstruction models before Gaussian Splatting
+        # Clean up all models before Gaussian Splatting
         logger.info("Clearing GPU memory before 3D Gaussian Splatting...")
-        if 'reconstructor' in locals():
-            del reconstructor
-        if 'spann3r' in locals():
-            del spann3r
-        clear_gpu_memory()
+        cleanup_all_models()
 
         gs_pipe = get_splat_pipeline()
         gs_data = gs_pipe.train(frame_dir, settings.output_dir / "gs_training")
@@ -714,6 +705,8 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     objectgs_data = None
     if config.enable_objectgs:
         try:
+            logger.info("Clearing GPU memory before ObjectGS...")
+            cleanup_all_models()
             from app.models.object_gs import get_objectgs_pipeline
             objectgs_pipe = get_objectgs_pipeline()
             if objectgs_pipe.available:
@@ -735,21 +728,9 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     cotracker_data = None
     if config.enable_cotracker3 and len(frame_paths) >= 2:
         try:
-            # Clean up models no longer needed before loading CoTracker3
+            # Clean up all models before CoTracker3
             logger.info("Clearing GPU memory before CoTracker3...")
-            if 'sam3' in locals() and sam3 is not None:
-                del sam3
-            if 'depth_model' in locals() and depth_model is not None:
-                del depth_model
-            if 'tracker' in locals() and tracker is not None:
-                tracker = None
-            if 'reconstructor' in locals():
-                del reconstructor
-            if 'gs_pipe' in locals():
-                del gs_pipe
-            if 'objectgs_pipe' in locals():
-                del objectgs_pipe
-            clear_gpu_memory()
+            cleanup_all_models()
 
             from app.models.cotracker3 import get_cotracker
             cotracker = get_cotracker(mode="offline")
@@ -776,9 +757,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 logger.info("CoTracker3: tracked %d points across %d frames",
                             cotracker_data.get("num_points", 0), len(cotracker_frames))
                 # Free CoTracker3 model memory for downstream stages
-                del cotracker
-                del cotracker_frames
-                clear_gpu_memory()
+                cleanup_all_models()
         except Exception as e:
             logger.warning("CoTracker3 failed: %s", e)
             _check_gpu_health()
@@ -860,6 +839,8 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     gs4d_data = None
     if config.enable_4dgs:
         try:
+            logger.info("Clearing GPU memory before 4D Gaussian Splatting...")
+            cleanup_all_models()
             from app.models.gaussian_splatting_4d import GaussianSplat4DPipeline
             gs4d_pipe = GaussianSplat4DPipeline(config=config)
             gs4d_output_dir = settings.output_dir / "4dgs_training"
