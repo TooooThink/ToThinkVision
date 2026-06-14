@@ -625,6 +625,18 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
 
     # Clean up ALL models (including global singletons) before loading 3D reconstruction.
     # SAM3's global singleton holds ~28GB; just `del sam3` only removes the local reference.
+    # Explicitly destroy ALL local references that hold SAM3 tensors:
+    #   - `sam3` local var (SAM3Predictor with backbone + video_predictor)
+    #   - `inference_state` dict (contains a second ref to video_predictor)
+    # Without these del's, Python won't GC them because they're still in scope.
+    if 'inference_state' in locals() and inference_state is not None:
+        inference_state.clear()
+        inference_state = None
+    if 'sam3' in locals() and sam3 is not None:
+        sam3 = None
+    if 'depth_model' in locals() and depth_model is not None:
+        depth_model = None
+
     logger.warning(">>> Clearing GPU memory before 3D reconstruction...")
     cleanup_all_models()
 
@@ -714,6 +726,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
 
         gs_pipe = get_splat_pipeline()
         gs_data = gs_pipe.train(frame_dir, settings.output_dir / "gs_training")
+        del gs_pipe  # drop local ref so cleanup can reclaim GPU memory
 
     # ─── ObjectGS: Per-object 3D Gaussian Splatting (optional) ──
     objectgs_data = None
@@ -734,6 +747,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 model_versions["object_gs"] = "per_object_3dgs"
                 logger.info("ObjectGS: trained %d per-object Gaussians",
                             len(objectgs_data.get("object_meshes", {})))
+                del objectgs_pipe  # drop local ref
         except Exception as e:
             logger.warning("ObjectGS failed: %s", e)
             _check_gpu_health()
@@ -771,6 +785,8 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 logger.info("CoTracker3: tracked %d points across %d frames",
                             cotracker_data.get("num_points", 0), len(cotracker_frames))
                 # Free CoTracker3 model memory for downstream stages
+                del cotracker
+                del cotracker_frames
                 cleanup_all_models()
         except Exception as e:
             logger.warning("CoTracker3 failed: %s", e)
@@ -864,6 +880,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
                 output_dir=gs4d_output_dir,
             )
             model_versions["gaussian_splatting_4d"] = "hexplane"
+            del gs4d_pipe  # DIRECT construction (not a singleton), must del explicitly
         except Exception as e:
             logger.warning("4D Gaussian Splatting failed: %s", e)
             _check_gpu_health()
