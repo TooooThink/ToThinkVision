@@ -32,14 +32,20 @@ if not _xdg_dir or not os.path.isdir(_xdg_dir) or not os.access(_xdg_dir, os.W_O
 _COLMAP_ENV["XDG_RUNTIME_DIR"] = _xdg_dir
 
 
-def _is_colmap_opengl_error(stderr: str) -> bool:
+def _is_colmap_opengl_error(stderr) -> bool:
     """Return True if the COLMAP stderr indicates an OpenGL/context failure.
 
     On headless HPC nodes without a GL context (no Xvfb, no EGL), COLMAP's
     GPU SIFT extraction aborts with ``Check failed: context_.create()``.
+
+    Args:
+        stderr: bytes or str — COLMAP may emit non-UTF-8 bytes (progress bars,
+            binary control chars) so we always decode with errors='replace'.
     """
     if not stderr:
         return False
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
     markers = ("context_.create()", "OpenGLContextManager", "opengl_utils",
                "Failed to create OpenGL", "QStandardPaths")
     return any(m in stderr for m in markers)
@@ -143,7 +149,6 @@ class ObjectGSPipeline:
                 ],
                 check=True,
                 capture_output=True,
-                text=True,
                 timeout=600,
                 env=_COLMAP_ENV,
             )
@@ -165,18 +170,18 @@ class ObjectGSPipeline:
                         ],
                         check=True,
                         capture_output=True,
-                        text=True,
                         timeout=1200,   # CPU is slower
                         env=_COLMAP_ENV,
                     )
                 except subprocess.CalledProcessError as e2:
                     raise RuntimeError(
                         f"COLMAP feature_extractor (CPU) failed (exit {e2.returncode}):\n"
-                        f"{e2.stderr[-2000:]}"
+                        f"{e2.stderr[-2000:].decode('utf-8', errors='replace')}"
                     ) from e2
             else:
                 raise RuntimeError(
-                    f"COLMAP feature_extractor failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
+                    f"COLMAP feature_extractor failed (exit {e.returncode}):\n"
+                    f"{e.stderr[-2000:].decode('utf-8', errors='replace')}"
                 ) from e
 
         logger.info("Running COLMAP exhaustive matching…")
@@ -188,7 +193,6 @@ class ObjectGSPipeline:
                 ],
                 check=True,
                 capture_output=True,
-                text=True,
                 timeout=600,
                 env=_COLMAP_ENV,
             )
@@ -207,18 +211,18 @@ class ObjectGSPipeline:
                         ],
                         check=True,
                         capture_output=True,
-                        text=True,
                         timeout=1200,
                         env=_COLMAP_ENV,
                     )
                 except subprocess.CalledProcessError as e2:
                     raise RuntimeError(
                         f"COLMAP exhaustive_matcher (CPU) failed (exit {e2.returncode}):\n"
-                        f"{e2.stderr[-2000:]}"
+                        f"{e2.stderr[-2000:].decode('utf-8', errors='replace')}"
                     ) from e2
             else:
                 raise RuntimeError(
-                    f"COLMAP exhaustive_matcher failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
+                    f"COLMAP exhaustive_matcher failed (exit {e.returncode}):\n"
+                    f"{e.stderr[-2000:].decode('utf-8', errors='replace')}"
                 ) from e
 
         logger.info("Running COLMAP sparse reconstruction…")
@@ -232,13 +236,13 @@ class ObjectGSPipeline:
                 ],
                 check=True,
                 capture_output=True,
-                text=True,
                 timeout=1200,
                 env=_COLMAP_ENV,
             )
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
-                f"COLMAP mapper failed (exit {e.returncode}):\n{e.stderr[-2000:]}"
+                f"COLMAP mapper failed (exit {e.returncode}):\n"
+                f"{e.stderr[-2000:].decode('utf-8', errors='replace')}"
             ) from e
 
         # COLMAP mapper creates sparse/0/, sparse/1/, etc.
