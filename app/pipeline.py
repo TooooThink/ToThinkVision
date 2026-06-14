@@ -137,8 +137,13 @@ def cleanup_all_models():
     if hasattr(omniparser, '_omniparser'):
         omniparser._omniparser = None
 
-    # Clear GPU memory
+    # Clear GPU memory aggressively
     if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        # Multiple gc rounds to handle circular references
+        gc.collect()
+        gc.collect()
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
@@ -620,15 +625,15 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
 
     # Clean up ALL models (including global singletons) before loading 3D reconstruction.
     # SAM3's global singleton holds ~28GB; just `del sam3` only removes the local reference.
-    logger.info("Clearing GPU memory before 3D reconstruction...")
+    logger.warning(">>> Clearing GPU memory before 3D reconstruction...")
     cleanup_all_models()
 
-    # Diagnostic: log GPU memory state after cleanup
+    # Diagnostic: log GPU memory state after cleanup (WARNING so it always shows)
     import torch
     if torch.cuda.is_available():
         free, total = torch.cuda.mem_get_info()
-        logger.info(
-            "GPU after cleanup: %.1f GB free / %.1f GB total (%.1f%% free)",
+        logger.warning(
+            ">>> GPU after cleanup: %.1f GB free / %.1f GB total (%.1f%% free)",
             free / 1024**3, total / 1024**3, free / total * 100,
         )
 
