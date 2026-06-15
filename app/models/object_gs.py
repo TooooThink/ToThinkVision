@@ -21,6 +21,29 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
+def _find_colmap() -> str:
+    """Find the colmap binary.
+
+    Checks (in order):
+    1. ``COLMAP_BIN`` environment variable (project-level config in run script)
+    2. ``colmap`` on PATH
+    """
+    import shutil
+
+    # 1. Explicit env var (set in run_test_real.sh or similar)
+    env_bin = os.environ.get("COLMAP_BIN")
+    if env_bin and os.path.isfile(env_bin) and os.access(env_bin, os.X_OK):
+        return env_bin
+
+    # 2. Standard PATH lookup
+    colmap_path = shutil.which("colmap")
+    if colmap_path:
+        return colmap_path
+
+    return "colmap"  # fallback to bare name, will raise FileNotFoundError
+
+
 # Headless environment for COLMAP on HPC/SSH nodes (no X11/Qt display)
 _COLMAP_ENV = os.environ.copy()
 _COLMAP_ENV.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -120,9 +143,11 @@ class ObjectGSPipeline:
         sparse_dir = scene_dir / "sparse"
         sparse_dir.mkdir(parents=True, exist_ok=True)
 
+        colmap_bin = _find_colmap()
+
         try:
             subprocess.run(
-                ["colmap", "help"],
+                [colmap_bin, "help"],
                 capture_output=True,
                 timeout=5,
                 env=_COLMAP_ENV,
@@ -141,7 +166,7 @@ class ObjectGSPipeline:
         try:
             subprocess.run(
                 [
-                    "colmap", "feature_extractor",
+                    colmap_bin, "feature_extractor",
                     "--database_path", str(db_path),
                     "--image_path", str(scene_dir),
                     "--ImageReader.camera_model", "PINHOLE",
@@ -161,7 +186,7 @@ class ObjectGSPipeline:
                 try:
                     subprocess.run(
                         [
-                            "colmap", "feature_extractor",
+                            colmap_bin, "feature_extractor",
                             "--database_path", str(db_path),
                             "--image_path", str(scene_dir),
                             "--ImageReader.camera_model", "PINHOLE",
@@ -188,7 +213,7 @@ class ObjectGSPipeline:
         try:
             subprocess.run(
                 [
-                    "colmap", "exhaustive_matcher",
+                    colmap_bin, "exhaustive_matcher",
                     "--database_path", str(db_path),
                 ],
                 check=True,
@@ -205,7 +230,7 @@ class ObjectGSPipeline:
                 try:
                     subprocess.run(
                         [
-                            "colmap", "exhaustive_matcher",
+                            colmap_bin, "exhaustive_matcher",
                             "--database_path", str(db_path),
                             "--SiftMatching.use_gpu", "0",
                         ],
@@ -229,7 +254,7 @@ class ObjectGSPipeline:
         try:
             subprocess.run(
                 [
-                    "colmap", "mapper",
+                    colmap_bin, "mapper",
                     "--database_path", str(db_path),
                     "--image_path", str(scene_dir),
                     "--output_path", str(sparse_dir),

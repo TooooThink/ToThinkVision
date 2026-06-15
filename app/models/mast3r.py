@@ -150,10 +150,12 @@ class VGGTReconstructor:
         all_points = []
         all_colors = []
 
-        # VGGT outputs point maps per view
-        pointmaps = predictions.get('point') if isinstance(predictions, dict) else getattr(predictions, 'point', None)
-        if pointmaps is None:
-            pointmaps = predictions.get('point_map') if isinstance(predictions, dict) else getattr(predictions, 'point_map', None)
+        # VGGT outputs point maps per view — key is 'world_points' (with 'world_points_conf')
+        pointmaps = None
+        for key in ('world_points', 'point', 'point_map'):
+            pointmaps = predictions.get(key) if isinstance(predictions, dict) else getattr(predictions, key, None)
+            if pointmaps is not None:
+                break
 
         if pointmaps is not None:
             if isinstance(pointmaps, torch.Tensor):

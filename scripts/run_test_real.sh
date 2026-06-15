@@ -69,9 +69,15 @@ eval "$(conda shell.bash hook 2>/dev/null)" || source ~/miniconda3/etc/profile.d
 
 conda activate ttv 2>/dev/null || conda activate base
 
-# Ensure colmap is in PATH on compute nodes (conda env may not fully propagate)
-export PATH="$HOME/jyy/anaconda/envs/ttv/bin:$PATH"
-echo "COLMAP: $(colmap --version 2>/dev/null | head -1 || echo 'NOT FOUND')"
+# ── External tool paths (project-level config) ──
+# COLMAP: required by ObjectGS and 3D Gaussian Splatting
+COLMAP_BIN="$(which colmap 2>/dev/null)"
+if [ -n "$COLMAP_BIN" ]; then
+    export COLMAP_BIN
+    echo "COLMAP: $COLMAP_BIN ($($COLMAP_BIN --version 2>/dev/null | head -1))"
+else
+    echo "WARNING: colmap not found in PATH. ObjectGS will fail."
+fi
 
 echo "Python: $(which python)"
 echo "CUDA: $(python -c 'import torch; print(torch.version.cuda)' 2>/dev/null || echo 'N/A')"
