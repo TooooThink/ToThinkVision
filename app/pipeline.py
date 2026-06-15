@@ -1102,6 +1102,32 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     if scene_graph_json_path:
         output.scene_graph_json_path = str(scene_graph_json_path)
 
+    # Final cleanup: release all GPU models before returning.
+    # This ensures the NEXT test/stage starts with maximum free VRAM.
+    if 'sam3' in locals():
+        sam3 = None
+    if 'inference_state' in locals():
+        inference_state = None
+    if 'depth_model' in locals():
+        depth_model = None
+    if 'reconstructor' in locals():
+        reconstructor = None
+    if 'spann3r' in locals():
+        spann3r = None
+    if 'gs_pipe' in locals():
+        gs_pipe = None
+    if 'objectgs_pipe' in locals():
+        objectgs_pipe = None
+    if 'cotracker' in locals():
+        cotracker = None
+    if 'som_pipe' in locals():
+        som_pipe = None
+    if 'gs4d_pipe' in locals():
+        gs4d_pipe = None
+    if 'traj_extractor' in locals():
+        traj_extractor = None
+    cleanup_all_models()
+
     return output
 
 
