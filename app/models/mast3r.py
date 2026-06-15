@@ -139,6 +139,14 @@ class VGGTReconstructor:
         from PIL import Image as PILImage
         import torch
 
+        # Diagnostic: log what keys VGGT actually returns
+        if isinstance(predictions, dict):
+            logger.warning(">>> VGGT predictions keys: %s", list(predictions.keys()))
+        else:
+            logger.warning(">>> VGGT predictions type: %s, attrs: %s",
+                           type(predictions).__name__,
+                           [a for a in dir(predictions) if not a.startswith('_')])
+
         all_points = []
         all_colors = []
 

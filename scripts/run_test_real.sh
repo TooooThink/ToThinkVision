@@ -68,6 +68,11 @@ echo "── Activating conda environment ──"
 eval "$(conda shell.bash hook 2>/dev/null)" || source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || true
 
 conda activate ttv 2>/dev/null || conda activate base
+
+# Ensure colmap is in PATH on compute nodes (conda env may not fully propagate)
+export PATH="$HOME/jyy/anaconda/envs/ttv/bin:$PATH"
+echo "COLMAP: $(colmap --version 2>/dev/null | head -1 || echo 'NOT FOUND')"
+
 echo "Python: $(which python)"
 echo "CUDA: $(python -c 'import torch; print(torch.version.cuda)' 2>/dev/null || echo 'N/A')"
 echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'N/A')"
