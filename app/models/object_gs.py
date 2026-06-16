@@ -295,11 +295,14 @@ class ObjectGSPipeline:
     def _patch_training_scripts(self, scene_dir: Path) -> None:
         """Patch hardcoded dataset paths in ObjectGS source files.
 
-        The ObjectGS repo has ``datasets/replica/scene`` hardcoded in various
-        files (Python argparse defaults, YAML configs, shell scripts).  This
-        scans ALL text files and replaces the path with our actual scene dir.
+        The ObjectGS repo has ``datasets/replica`` hardcoded in YAML configs.
+        ``train.py`` dynamically appends the scene name at runtime via
+        ``os.path.join(source_path, args.scene_name)``.  So we replace
+        ``datasets/replica`` with the absolute path to ``data_dir``
+        (= ``scene_dir.parent``), and ObjectGS will append ``/scene``.
         """
-        abs_scene_dir = str(scene_dir.resolve())
+        # data_dir is scene_dir's parent (data_dir/scene/ → data_dir/)
+        abs_data_dir = str(scene_dir.parent.resolve())
         repo = self.repo_path
 
         # Extensions to scan (skip binaries, images, compiled files)
@@ -313,14 +316,14 @@ class ObjectGSPipeline:
                 continue
             if fpath.suffix not in scan_extensions:
                 continue
-            # Skip .git and __pycache__
-            if any(p in fpath.parts for p in ('.git', '__pycache__', 'node_modules')):
+            # Skip .git, __pycache__, and previous output logs
+            if any(p in fpath.parts for p in ('.git', '__pycache__', 'node_modules', 'outputs')):
                 continue
 
             try:
                 content = fpath.read_text(errors='ignore')
-                if 'datasets/replica/scene' in content:
-                    patched = content.replace('datasets/replica/scene', abs_scene_dir)
+                if 'datasets/replica' in content:
+                    patched = content.replace('datasets/replica', abs_data_dir)
                     fpath.write_text(patched)
                     patched_files.append(str(fpath.relative_to(repo)))
             except Exception:
@@ -328,12 +331,12 @@ class ObjectGSPipeline:
 
         if patched_files:
             logger.warning(
-                ">>> Patched 'datasets/replica/scene' → '%s' in: %s",
-                abs_scene_dir, ', '.join(patched_files),
+                ">>> Patched 'datasets/replica' → '%s' in: %s",
+                abs_data_dir, ', '.join(patched_files),
             )
         else:
             logger.warning(
-                ">>> No files contain 'datasets/replica/scene' (already patched or different path)"
+                ">>> No files contain 'datasets/replica' (already patched or different path)"
             )
 
     def train(
