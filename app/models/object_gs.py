@@ -292,14 +292,32 @@ class ObjectGSPipeline:
 
         logger.info("COLMAP sparse reconstruction saved to %s", model_dir)
 
-    def _patch_training_scripts(self) -> None:
-        """Patch hardcoded dataset paths in ObjectGS training shell scripts.
+    def _patch_training_scripts(self, scene_dir: Path) -> None:
+        """Patch hardcoded dataset paths in ObjectGS training scripts and configs.
 
-        The ObjectGS repo ships with ``train_3d.sh`` / ``train_2d.sh`` that
-        contain a hardcoded ``datasets/replica/scene`` path.  This replaces
-        that path with ``"$1"`` so the scripts honour the data directory we
-        pass as the first positional argument.
+        The ObjectGS repo ships with YAML config files under ``config/`` that
+        contain a hardcoded ``source_path: datasets/replica/scene``.  This
+        replaces that path with the absolute path to our scene directory.
         """
+        abs_scene_dir = str(scene_dir.resolve())
+
+        # Patch YAML config files (where the actual source_path is defined)
+        config_dir = self.repo_path / "config"
+        if config_dir.exists():
+            for yaml_file in config_dir.rglob("*.yaml"):
+                try:
+                    content = yaml_file.read_text()
+                    if "datasets/replica/scene" in content:
+                        patched = content.replace("datasets/replica/scene", abs_scene_dir)
+                        yaml_file.write_text(patched)
+                        logger.warning(
+                            ">>> Patched 'datasets/replica/scene' → '%s' in %s",
+                            abs_scene_dir, yaml_file,
+                        )
+                except Exception as e:
+                    logger.warning("Failed to patch %s: %s", yaml_file, e)
+
+        # Also patch shell scripts (legacy, in case they contain the path)
         for script_name in ("train_3d.sh", "train_2d.sh"):
             script_path = self.repo_path / script_name
             if not script_path.exists():
@@ -307,13 +325,13 @@ class ObjectGSPipeline:
 
             content = script_path.read_text()
             if "datasets/replica/scene" not in content:
-                continue  # already patched or uses a variable
+                continue
 
-            patched = content.replace("datasets/replica/scene", '"$1"')
+            patched = content.replace("datasets/replica/scene", abs_scene_dir)
             script_path.write_text(patched)
-            logger.info(
-                "Patched hardcoded 'datasets/replica/scene' → \"$1\" in %s",
-                script_path,
+            logger.warning(
+                ">>> Patched 'datasets/replica/scene' → '%s' in %s",
+                abs_scene_dir, script_path,
             )
 
     def train(
@@ -373,8 +391,8 @@ class ObjectGSPipeline:
         # ObjectGS requires pre-computed COLMAP output at scene_dir/sparse/0/.
         self._run_colmap_for_scene(scene_dir, frame_paths)
 
-        # Patch hardcoded dataset paths in training scripts
-        self._patch_training_scripts()
+        # Patch hardcoded dataset paths in training scripts and configs
+        self._patch_training_scripts(scene_dir)
 
         # Run training
         script = "train_2d.sh" if use_2dgs else "train_3d.sh"
