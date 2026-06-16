@@ -154,13 +154,13 @@ class ObjectGSPipeline:
             subprocess.run(
                 [colmap_bin, "help"],
                 capture_output=True,
-                timeout=5,
+                timeout=10,
                 env=_COLMAP_ENV,
             )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
             raise RuntimeError(
-                "COLMAP not found. Install COLMAP to use ObjectGS: "
-                "https://colmap.github.io/install.html"
+                f"COLMAP binary at '{colmap_bin}' failed to execute: {e}. "
+                f"Check that all shared libraries are available (ldd {colmap_bin})."
             )
 
         # COLMAP reads images via --image_path (scene_dir), where absolute
