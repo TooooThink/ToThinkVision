@@ -392,6 +392,14 @@ class ObjectGSPipeline:
             if not dst.exists():
                 dst.symlink_to(fp.resolve())
 
+        # ObjectGS (3DGS) expects images in source_path/images/ subdirectory
+        images_dir = scene_dir / "images"
+        images_dir.mkdir(exist_ok=True)
+        for i, fp in enumerate(frame_paths):
+            dst = images_dir / f"{i:06d}.jpg"
+            if not dst.exists():
+                dst.symlink_to(fp.resolve())
+
         # Run COLMAP to estimate camera poses and produce sparse reconstruction.
         # ObjectGS requires pre-computed COLMAP output at scene_dir/sparse/0/.
         self._run_colmap_for_scene(scene_dir, frame_paths)
