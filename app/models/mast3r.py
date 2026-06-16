@@ -180,9 +180,20 @@ class VGGTReconstructor:
             for i in range(pointmaps.shape[0]):
                 pts = pointmaps[i]
 
-                # Handle different shapes: [H, W, 3], [3, H, W], or [N, 3] (flattened)
+                # VGGT world_points can be:
+                #   5D: [B, N_frames, H, W, 3] → pts is [N_frames, H, W, 3] (4D)
+                #   4D: [B, 3, H, W]           → pts is [3, H, W] (3D)
+                #   4D: [B, H, W, 3]           → pts is [H, W, 3] (3D)
+                #   3D: [B, N, 3]              → pts is [N, 3] (2D)
+                if pts.ndim == 4:
+                    # [N_frames, H, W, 3] → flatten to [N_frames * H, W, 3]
+                    n_frames = pts.shape[0]
+                    h, w = pts.shape[1], pts.shape[2]
+                    pts = pts.reshape(n_frames * h, w, 3)
+
+                # Handle [3, H, W] → transpose to [H, W, 3]
                 if pts.ndim == 3 and pts.shape[0] == 3:
-                    pts = pts.transpose(1, 2, 0)  # [3, H, W] → [H, W, 3]
+                    pts = pts.transpose(1, 2, 0)
 
                 if pts.ndim == 2 and pts.shape[1] == 3:
                     # Flattened [N, 3] — reshape to spatial if we know H, W
