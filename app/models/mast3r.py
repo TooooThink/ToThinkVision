@@ -161,19 +161,52 @@ class VGGTReconstructor:
             if isinstance(pointmaps, torch.Tensor):
                 pointmaps = pointmaps.cpu().numpy()
 
+            # Get spatial dimensions from depth map (shape: [B, 1, H, W])
+            # VGGT's world_points may be [B, H, W, 3] or [B, H*W, 3] (flattened)
+            depth = predictions.get('depth') if isinstance(predictions, dict) else getattr(predictions, 'depth', None)
+            if depth is not None:
+                if isinstance(depth, torch.Tensor):
+                    depth = depth.cpu().numpy()
+                # depth shape: [B, 1, H, W] or [B, H, W]
+                if depth.ndim == 4:
+                    vggt_h, vggt_w = depth.shape[2], depth.shape[3]
+                elif depth.ndim == 3:
+                    vggt_h, vggt_w = depth.shape[1], depth.shape[2]
+                else:
+                    vggt_h, vggt_w = None, None
+            else:
+                vggt_h, vggt_w = None, None
+
             for i in range(pointmaps.shape[0]):
-                pts = pointmaps[i]  # [H, W, 3] or [3, H, W]
-                if pts.shape[0] == 3:
-                    pts = pts.transpose(1, 2, 0)  # [H, W, 3]
+                pts = pointmaps[i]
+
+                # Handle different shapes: [H, W, 3], [3, H, W], or [N, 3] (flattened)
+                if pts.ndim == 3 and pts.shape[0] == 3:
+                    pts = pts.transpose(1, 2, 0)  # [3, H, W] → [H, W, 3]
+
+                if pts.ndim == 2 and pts.shape[1] == 3:
+                    # Flattened [N, 3] — reshape to spatial if we know H, W
+                    if vggt_h and vggt_w and pts.shape[0] == vggt_h * vggt_w:
+                        pts = pts.reshape(vggt_h, vggt_w, 3)
+                    else:
+                        # Can't determine spatial dims, use as-is
+                        pts_flat = pts
+                        valid = np.isfinite(pts_flat).all(axis=1) & (np.abs(pts_flat) < 100).all(axis=1)
+                        pts_valid = pts_flat[valid]
+                        colors_valid = np.ones((len(pts_valid), 3), dtype=np.uint8) * 128
+                        all_points.append(pts_valid)
+                        all_colors.append(colors_valid)
+                        continue
 
                 pts_flat = pts.reshape(-1, 3)
                 valid = np.isfinite(pts_flat).all(axis=1) & (np.abs(pts_flat) < 100).all(axis=1)
                 pts_valid = pts_flat[valid]
 
-                # Get colors from source image
+                # Get colors from source image, resized to match VGGT output resolution
                 if i < len(image_paths):
                     img = PILImage.open(image_paths[i]).convert("RGB")
-                    img_np = np.array(img.resize((pts.shape[1], pts.shape[0])))
+                    h, w = pts.shape[0], pts.shape[1]
+                    img_np = np.array(img.resize((w, h)))
                     img_flat = img_np.reshape(-1, 3)
                     colors_valid = img_flat[valid]
                 else:
