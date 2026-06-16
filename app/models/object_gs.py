@@ -293,45 +293,47 @@ class ObjectGSPipeline:
         logger.info("COLMAP sparse reconstruction saved to %s", model_dir)
 
     def _patch_training_scripts(self, scene_dir: Path) -> None:
-        """Patch hardcoded dataset paths in ObjectGS training scripts and configs.
+        """Patch hardcoded dataset paths in ObjectGS source files.
 
-        The ObjectGS repo ships with YAML config files under ``config/`` that
-        contain a hardcoded ``source_path: datasets/replica/scene``.  This
-        replaces that path with the absolute path to our scene directory.
+        The ObjectGS repo has ``datasets/replica/scene`` hardcoded in various
+        files (Python argparse defaults, YAML configs, shell scripts).  This
+        scans ALL text files and replaces the path with our actual scene dir.
         """
         abs_scene_dir = str(scene_dir.resolve())
+        repo = self.repo_path
 
-        # Patch YAML config files (where the actual source_path is defined)
-        config_dir = self.repo_path / "config"
-        if config_dir.exists():
-            for yaml_file in config_dir.rglob("*.yaml"):
-                try:
-                    content = yaml_file.read_text()
-                    if "datasets/replica/scene" in content:
-                        patched = content.replace("datasets/replica/scene", abs_scene_dir)
-                        yaml_file.write_text(patched)
-                        logger.warning(
-                            ">>> Patched 'datasets/replica/scene' → '%s' in %s",
-                            abs_scene_dir, yaml_file,
-                        )
-                except Exception as e:
-                    logger.warning("Failed to patch %s: %s", yaml_file, e)
+        # Extensions to scan (skip binaries, images, compiled files)
+        scan_extensions = {
+            '.py', '.yaml', '.yml', '.sh', '.json', '.cfg', '.ini', '.txt',
+        }
 
-        # Also patch shell scripts (legacy, in case they contain the path)
-        for script_name in ("train_3d.sh", "train_2d.sh"):
-            script_path = self.repo_path / script_name
-            if not script_path.exists():
+        patched_files = []
+        for fpath in repo.rglob("*"):
+            if not fpath.is_file():
+                continue
+            if fpath.suffix not in scan_extensions:
+                continue
+            # Skip .git and __pycache__
+            if any(p in fpath.parts for p in ('.git', '__pycache__', 'node_modules')):
                 continue
 
-            content = script_path.read_text()
-            if "datasets/replica/scene" not in content:
+            try:
+                content = fpath.read_text(errors='ignore')
+                if 'datasets/replica/scene' in content:
+                    patched = content.replace('datasets/replica/scene', abs_scene_dir)
+                    fpath.write_text(patched)
+                    patched_files.append(str(fpath.relative_to(repo)))
+            except Exception:
                 continue
 
-            patched = content.replace("datasets/replica/scene", abs_scene_dir)
-            script_path.write_text(patched)
+        if patched_files:
             logger.warning(
-                ">>> Patched 'datasets/replica/scene' → '%s' in %s",
-                abs_scene_dir, script_path,
+                ">>> Patched 'datasets/replica/scene' → '%s' in: %s",
+                abs_scene_dir, ', '.join(patched_files),
+            )
+        else:
+            logger.warning(
+                ">>> No files contain 'datasets/replica/scene' (already patched or different path)"
             )
 
     def train(
