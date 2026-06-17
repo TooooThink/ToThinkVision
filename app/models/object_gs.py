@@ -166,8 +166,10 @@ class ObjectGSPipeline:
                 f"Check that all shared libraries are available (ldd {colmap_bin})."
             )
 
-        # COLMAP reads images via --image_path (scene_dir), where absolute
-        # symlinks ensure images are found regardless of working directory.
+        # COLMAP reads images via --image_path. Use the images/ subdirectory
+        # so that COLMAP stores names like "images/000000.jpg" in images.bin,
+        # which matches the 3DGS/ObjectGS expected path: source_path/images/<name>.
+        images_path = scene_dir / "images"
         db_path = sparse_dir / "database.db"
 
         logger.info("Running COLMAP feature extraction on %d images…", len(frame_paths))
@@ -176,7 +178,7 @@ class ObjectGSPipeline:
                 [
                     colmap_bin, "feature_extractor",
                     "--database_path", str(db_path),
-                    "--image_path", str(scene_dir),
+                    "--image_path", str(images_path),
                     "--ImageReader.camera_model", "PINHOLE",
                     "--ImageReader.single_camera", "1",
                 ],
@@ -196,7 +198,7 @@ class ObjectGSPipeline:
                         [
                             colmap_bin, "feature_extractor",
                             "--database_path", str(db_path),
-                            "--image_path", str(scene_dir),
+                            "--image_path", str(images_path),
                             "--ImageReader.camera_model", "PINHOLE",
                             "--ImageReader.single_camera", "1",
                             "--SiftExtraction.use_gpu", "0",
@@ -264,7 +266,7 @@ class ObjectGSPipeline:
                 [
                     colmap_bin, "mapper",
                     "--database_path", str(db_path),
-                    "--image_path", str(scene_dir),
+                    "--image_path", str(images_path),
                     "--output_path", str(sparse_dir),
                 ],
                 check=True,
