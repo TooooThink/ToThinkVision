@@ -736,12 +736,19 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             from app.models.object_gs import get_objectgs_pipeline
             objectgs_pipe = get_objectgs_pipeline()
             if objectgs_pipe.available:
+                # Use SLURM_JOB_ID (or timestamp) to isolate each run's data
+                # and prevent old COLMAP output from contaminating new runs.
+                run_id = os.environ.get("SLURM_JOB_ID", "")
+                if not run_id:
+                    import datetime
+                    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                objectgs_output = settings.output_dir / f"objectgs_training_{run_id}"
                 masks_dir = img_dir / "objectgs_masks"
                 masks_dir.mkdir(parents=True, exist_ok=True)
                 objectgs_data = objectgs_pipe.train(
                     frame_dir=frame_dir,
                     masks_dir=masks_dir,
-                    output_dir=settings.output_dir / "objectgs_training",
+                    output_dir=objectgs_output,
                 )
                 model_versions["object_gs"] = "per_object_3dgs"
                 logger.info("ObjectGS: trained %d per-object Gaussians",
