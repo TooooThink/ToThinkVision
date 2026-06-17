@@ -146,7 +146,10 @@ class ObjectGSPipeline:
                 so COLMAP can read images regardless of working directory)
         """
         sparse_dir = scene_dir / "sparse"
-        sparse_dir.mkdir(parents=True, exist_ok=True)
+        # Clean old COLMAP output to avoid mixing data from different runs
+        if sparse_dir.exists():
+            shutil.rmtree(sparse_dir)
+        sparse_dir.mkdir(parents=True)
 
         colmap_bin = _find_colmap()
 
