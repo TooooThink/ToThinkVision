@@ -303,32 +303,41 @@ class ObjectGSPipeline:
         The ObjectGS repo has ``datasets/replica`` hardcoded in YAML configs.
         ``train.py`` dynamically appends the scene name at runtime via
         ``os.path.join(source_path, args.scene_name)``.  So we replace
-        ``datasets/replica`` with the absolute path to ``data_dir``
+        the source_path value with the absolute path to ``data_dir``
         (= ``scene_dir.parent``), and ObjectGS will append ``/scene``.
+
+        Handles both the original ``datasets/replica`` and paths left over
+        from previous runs (which are absolute paths under outputs/).
         """
+        import re
+
         # data_dir is scene_dir's parent (data_dir/scene/ → data_dir/)
         abs_data_dir = str(scene_dir.parent.resolve())
         repo = self.repo_path
 
-        # Extensions to scan (skip binaries, images, compiled files)
-        scan_extensions = {
-            '.py', '.yaml', '.yml', '.sh', '.json', '.cfg', '.ini', '.txt',
-        }
+        # Pattern: matches any source_path value in YAML (original or previously patched)
+        # e.g. "source_path: datasets/replica" or "source_path: /some/old/path"
+        source_path_pattern = re.compile(
+            r'(source_path\s*:\s*).*',
+        )
 
         patched_files = []
-        for fpath in repo.rglob("*"):
+        for fpath in repo.rglob("*.yaml"):
             if not fpath.is_file():
                 continue
-            if fpath.suffix not in scan_extensions:
-                continue
-            # Skip .git, __pycache__, and previous output logs
-            if any(p in fpath.parts for p in ('.git', '__pycache__', 'node_modules', 'outputs')):
+            if any(p in fpath.parts for p in ('.git', '__pycache__', 'outputs')):
                 continue
 
             try:
                 content = fpath.read_text(errors='ignore')
-                if 'datasets/replica' in content:
-                    patched = content.replace('datasets/replica', abs_data_dir)
+                if 'source_path' not in content:
+                    continue
+
+                patched = source_path_pattern.sub(
+                    f'source_path: {abs_data_dir}',
+                    content,
+                )
+                if patched != content:
                     fpath.write_text(patched)
                     patched_files.append(str(fpath.relative_to(repo)))
             except Exception:
@@ -336,12 +345,12 @@ class ObjectGSPipeline:
 
         if patched_files:
             logger.warning(
-                ">>> Patched 'datasets/replica' → '%s' in: %s",
+                ">>> Patched source_path → '%s' in: %s",
                 abs_data_dir, ', '.join(patched_files),
             )
         else:
             logger.warning(
-                ">>> No files contain 'datasets/replica' (already patched or different path)"
+                ">>> No YAML files with source_path found to patch"
             )
 
     def train(
