@@ -152,19 +152,7 @@ class ObjectGSPipeline:
         sparse_dir.mkdir(parents=True)
 
         colmap_bin = _find_colmap()
-
-        try:
-            subprocess.run(
-                [colmap_bin, "help"],
-                capture_output=True,
-                timeout=10,
-                env=_COLMAP_ENV,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
-            raise RuntimeError(
-                f"COLMAP binary at '{colmap_bin}' failed to execute: {e}. "
-                f"Check that all shared libraries are available (ldd {colmap_bin})."
-            )
+        logger.info("Using COLMAP binary: %s", colmap_bin)
 
         # COLMAP reads images via --image_path. Use the images/ subdirectory
         # so that COLMAP stores names like "images/000000.jpg" in images.bin,
