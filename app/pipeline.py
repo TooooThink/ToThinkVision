@@ -219,15 +219,18 @@ def process_file(file_path: Path, mode: str = "general", config: PipelineConfig 
     if config is None:
         config = PipelineConfig(mode=mode)
 
-    # Isolate all outputs per run (SLURM_JOB_ID or timestamp)
-    run_id = os.environ.get("SLURM_JOB_ID", "")
-    if not run_id:
-        import datetime
-        run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_output_dir = settings.output_dir / run_id
-    run_output_dir.mkdir(parents=True, exist_ok=True)
-    settings.output_dir = run_output_dir
-    logger.warning(">>> Run output directory: %s", run_output_dir)
+    # Isolate all outputs per run (SLURM_JOB_ID or timestamp).
+    # Only set once — skip if already pointing to a run-specific directory.
+    if not getattr(process_file, '_run_dir_set', False):
+        run_id = os.environ.get("SLURM_JOB_ID", "")
+        if not run_id:
+            import datetime
+            run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_output_dir = settings.output_dir / run_id
+        run_output_dir.mkdir(parents=True, exist_ok=True)
+        settings.output_dir = run_output_dir
+        process_file._run_dir_set = True
+        logger.warning(">>> Run output directory: %s", run_output_dir)
 
     if is_video(file_path):
         return _process_video(file_path, config)
