@@ -387,10 +387,9 @@ class ObjectGSPipeline:
             + list(Path(frame_dir).glob("*.png"))
         )
 
-        # ObjectGS (3DGS) expects images in source_path/images/ subdirectory.
-        # Only place images there — NOT at root level (which would confuse COLMAP
-        # into seeing 2x duplicate images and failing reconstruction).
-        images_dir = scene_dir / "images"
+        # ObjectGS expects images in source_path/scene/images_all/ (per YAML config).
+        # Only place images there — NOT at root level (which would confuse COLMAP).
+        images_dir = scene_dir / "images_all"
         images_dir.mkdir(exist_ok=True)
         for i, fp in enumerate(frame_paths):
             dst = images_dir / f"{i:06d}.jpg"
