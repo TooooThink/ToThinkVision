@@ -131,7 +131,7 @@ class ObjectGSPipeline:
         return None
 
     def _run_colmap_for_scene(
-        self, scene_dir: Path, frame_paths: list[Path]
+        self, scene_dir: Path, images_dir: Path, frame_paths: list[Path]
     ) -> None:
         """Run COLMAP on scene images to produce sparse reconstruction.
 
@@ -154,10 +154,8 @@ class ObjectGSPipeline:
         colmap_bin = _find_colmap()
         logger.info("Using COLMAP binary: %s", colmap_bin)
 
-        # COLMAP reads images via --image_path. Use scene_dir (root) so that
-        # COLMAP stores image names as "000000.jpg" (without path prefix).
-        # ObjectGS's readColmapCameras joins with source_path/images/ internally,
-        # so the final path becomes source_path/images/000000.jpg.
+        # COLMAP reads images from images_dir so extr.name = "000000.jpg" (no prefix).
+        # ObjectGS later joins with source_path/images/ to find the files.
         db_path = sparse_dir / "database.db"
 
         logger.info("Running COLMAP feature extraction on %d images…", len(frame_paths))
@@ -166,7 +164,7 @@ class ObjectGSPipeline:
                 [
                     colmap_bin, "feature_extractor",
                     "--database_path", str(db_path),
-                    "--image_path", str(scene_dir),
+                    "--image_path", str(images_dir),
                     "--ImageReader.camera_model", "PINHOLE",
                     "--ImageReader.single_camera", "1",
                 ],
@@ -186,7 +184,7 @@ class ObjectGSPipeline:
                         [
                             colmap_bin, "feature_extractor",
                             "--database_path", str(db_path),
-                            "--image_path", str(scene_dir),
+                            "--image_path", str(images_dir),
                             "--ImageReader.camera_model", "PINHOLE",
                             "--ImageReader.single_camera", "1",
                             "--SiftExtraction.use_gpu", "0",
@@ -254,7 +252,7 @@ class ObjectGSPipeline:
                 [
                     colmap_bin, "mapper",
                     "--database_path", str(db_path),
-                    "--image_path", str(scene_dir),
+                    "--image_path", str(images_dir),
                     "--output_path", str(sparse_dir),
                 ],
                 check=True,
@@ -389,12 +387,9 @@ class ObjectGSPipeline:
             + list(Path(frame_dir).glob("*.png"))
         )
 
-        for i, fp in enumerate(frame_paths):
-            dst = scene_dir / f"{i:06d}.jpg"
-            if not dst.exists():
-                dst.symlink_to(fp.resolve())
-
-        # ObjectGS (3DGS) expects images in source_path/images/ subdirectory
+        # ObjectGS (3DGS) expects images in source_path/images/ subdirectory.
+        # Only place images there — NOT at root level (which would confuse COLMAP
+        # into seeing 2x duplicate images and failing reconstruction).
         images_dir = scene_dir / "images"
         images_dir.mkdir(exist_ok=True)
         for i, fp in enumerate(frame_paths):
@@ -402,9 +397,9 @@ class ObjectGSPipeline:
             if not dst.exists():
                 dst.symlink_to(fp.resolve())
 
-        # Run COLMAP to estimate camera poses and produce sparse reconstruction.
-        # ObjectGS requires pre-computed COLMAP output at scene_dir/sparse/0/.
-        self._run_colmap_for_scene(scene_dir, frame_paths)
+        # Run COLMAP on the images/ subdirectory so extr.name = "000000.jpg".
+        # ObjectGS then does os.path.join(source_path/images/, extr.name).
+        self._run_colmap_for_scene(scene_dir, images_dir, frame_paths)
 
         # Patch hardcoded dataset paths in training scripts and configs
         self._patch_training_scripts(scene_dir)
