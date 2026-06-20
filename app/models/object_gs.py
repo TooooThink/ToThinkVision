@@ -446,6 +446,22 @@ class ObjectGSPipeline:
             if not dst.exists():
                 dst.symlink_to(fp.resolve())
 
+        # ObjectGS requires per-object masks at object_mask_all/.
+        # If no masks provided, create dummy all-white masks (whole image = one object).
+        mask_dir = scene_dir / "object_mask_all"
+        mask_dir.mkdir(exist_ok=True)
+        if masks_dir and Path(masks_dir).exists():
+            # TODO: use actual per-object masks from SAM3
+            pass
+        for i, fp in enumerate(frame_paths):
+            mask_dst = mask_dir / f"{i:06d}.png"
+            if not mask_dst.exists():
+                from PIL import Image as PILImage
+                img = PILImage.open(fp)
+                w, h = img.size
+                dummy_mask = PILImage.new("L", (w, h), 255)
+                dummy_mask.save(str(mask_dst))
+
         # Run COLMAP on the images/ subdirectory so extr.name = "000000.jpg".
         # ObjectGS then does os.path.join(source_path/images/, extr.name).
         self._run_colmap_for_scene(scene_dir, images_dir, frame_paths)
