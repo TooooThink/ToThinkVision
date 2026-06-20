@@ -447,20 +447,33 @@ class ObjectGSPipeline:
                 dst.symlink_to(fp.resolve())
 
         # ObjectGS requires per-object masks at object_mask_all/.
-        # If no masks provided, create dummy all-white masks (whole image = one object).
+        # Each pixel value = object label (1, 2, 3...), 0 = background.
         mask_dir = scene_dir / "object_mask_all"
         mask_dir.mkdir(exist_ok=True)
+
+        has_real_masks = False
         if masks_dir and Path(masks_dir).exists():
-            # TODO: use actual per-object masks from SAM3
-            pass
-        for i, fp in enumerate(frame_paths):
-            mask_dst = mask_dir / f"{i:06d}.png"
-            if not mask_dst.exists():
-                from PIL import Image as PILImage
-                img = PILImage.open(fp)
-                w, h = img.size
-                dummy_mask = PILImage.new("L", (w, h), 255)
-                dummy_mask.save(str(mask_dst))
+            # Copy real per-frame label masks from SAM3
+            mask_files = sorted(Path(masks_dir).glob("*.png"))
+            if mask_files:
+                for mf in mask_files:
+                    dst = mask_dir / mf.name
+                    if not dst.exists():
+                        shutil.copy2(str(mf), str(dst))
+                has_real_masks = True
+                logger.info("Using %d real per-object masks from SAM3", len(mask_files))
+
+        if not has_real_masks:
+            # Fallback: dummy all-white masks (whole image = one object)
+            for i, fp in enumerate(frame_paths):
+                mask_dst = mask_dir / f"{i:06d}.png"
+                if not mask_dst.exists():
+                    from PIL import Image as PILImage
+                    img = PILImage.open(fp)
+                    w, h = img.size
+                    dummy_mask = PILImage.new("L", (w, h), 255)
+                    dummy_mask.save(str(mask_dst))
+            logger.warning("No real masks available, using dummy all-white masks")
 
         # Run COLMAP on the images/ subdirectory so extr.name = "000000.jpg".
         # ObjectGS then does os.path.join(source_path/images/, extr.name).
