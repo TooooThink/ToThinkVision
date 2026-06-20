@@ -283,6 +283,56 @@ class ObjectGSPipeline:
 
         logger.info("COLMAP sparse reconstruction saved to %s", model_dir)
 
+        # Convert points3D.bin → points3D.ply (ObjectGS requires PLY format)
+        self._convert_points_to_ply(model_dir)
+
+    def _convert_points_to_ply(self, model_dir: Path) -> None:
+        """Convert COLMAP points3D.bin to points3D.ply for ObjectGS."""
+        import struct
+
+        bin_path = model_dir / "points3D.bin"
+        ply_path = model_dir / "points3D.ply"
+
+        if not bin_path.exists():
+            logger.warning("points3D.bin not found, skipping PLY conversion")
+            return
+
+        if ply_path.exists():
+            return  # already converted
+
+        with open(bin_path, "rb") as f:
+            num_points = struct.unpack("<Q", f.read(8))[0]
+
+            xyz = np.zeros((num_points, 3), dtype=np.float32)
+            rgb = np.zeros((num_points, 3), dtype=np.uint8)
+
+            for i in range(num_points):
+                struct.unpack("<Q", f.read(8))  # point3d_id
+                xyz[i] = struct.unpack("<ddd", f.read(24))
+                rgb[i] = struct.unpack("<BBB", f.read(3))
+                struct.unpack("<d", f.read(8))  # error
+                # track: list of (image_id, point2D_idx) pairs
+                track_length = struct.unpack("<Q", f.read(8))[0]
+                f.read(track_length * 8)  # skip track data
+
+        # Write PLY
+        with open(ply_path, "w") as f:
+            f.write("ply\n")
+            f.write("format ascii 1.0\n")
+            f.write(f"element vertex {num_points}\n")
+            f.write("property float x\n")
+            f.write("property float y\n")
+            f.write("property float z\n")
+            f.write("property uchar red\n")
+            f.write("property uchar green\n")
+            f.write("property uchar blue\n")
+            f.write("end_header\n")
+            for i in range(num_points):
+                f.write(f"{xyz[i, 0]} {xyz[i, 1]} {xyz[i, 2]} "
+                        f"{rgb[i, 0]} {rgb[i, 1]} {rgb[i, 2]}\n")
+
+        logger.info("Converted points3D.bin → points3D.ply (%d points)", num_points)
+
     def _patch_training_scripts(self, scene_dir: Path) -> None:
         """Patch hardcoded dataset paths in ObjectGS source files.
 
