@@ -141,9 +141,9 @@ class VGGTReconstructor:
 
         # Diagnostic: log what keys VGGT actually returns
         if isinstance(predictions, dict):
-            logger.warning(">>> VGGT predictions keys: %s", list(predictions.keys()))
+            logger.info("VGGT predictions keys: %s", list(predictions.keys()))
         else:
-            logger.warning(">>> VGGT predictions type: %s, attrs: %s",
+            logger.info("VGGT predictions type: %s, attrs: %s",
                            type(predictions).__name__,
                            [a for a in dir(predictions) if not a.startswith('_')])
 

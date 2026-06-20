@@ -34,7 +34,7 @@ def _find_colmap() -> str:
     # 1. Explicit env var (set in run_test_real.sh or similar)
     env_bin = os.environ.get("COLMAP_BIN")
     if env_bin:
-        logger.warning(">>> COLMAP_BIN=%s, exists=%s, executable=%s",
+        logger.info("COLMAP_BIN=%s, exists=%s, executable=%s",
                         env_bin, os.path.isfile(env_bin), os.access(env_bin, os.X_OK))
         if os.path.isfile(env_bin) and os.access(env_bin, os.X_OK):
             return env_bin
@@ -42,10 +42,10 @@ def _find_colmap() -> str:
     # 2. Standard PATH lookup
     colmap_path = shutil.which("colmap")
     if colmap_path:
-        logger.warning(">>> colmap found on PATH: %s", colmap_path)
+        logger.info("colmap found on PATH: %s", colmap_path)
         return colmap_path
 
-    logger.warning(">>> colmap NOT FOUND (COLMAP_BIN=%s, PATH search failed)", env_bin)
+    logger.info("colmap NOT FOUND (COLMAP_BIN=%s, PATH search failed)", env_bin)
     return "colmap"  # fallback to bare name, will raise FileNotFoundError
 
 

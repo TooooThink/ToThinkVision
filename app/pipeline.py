@@ -230,7 +230,7 @@ def process_file(file_path: Path, mode: str = "general", config: PipelineConfig 
         run_output_dir.mkdir(parents=True, exist_ok=True)
         settings.output_dir = run_output_dir
         process_file._run_dir_set = True
-        logger.warning(">>> Run output directory: %s", run_output_dir)
+        logger.info("Run output directory: %s", run_output_dir)
 
     if is_video(file_path):
         return _process_video(file_path, config)
@@ -556,6 +556,11 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             )
         logger.info("Generated %d ObjectGS label masks in %s",
                      len(frames_by_idx), objectgs_masks_dir)
+        del frames_by_idx  # free intermediate data
+
+    # Free propagation results (large numpy mask arrays) — already consumed above
+    if 'propagation_results' in locals():
+        propagation_results = None
 
     # ─── Stage 1: Multi-frame Mask Accumulation ─────────────
     accumulator = MaskAccumulator(
@@ -674,7 +679,7 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     if 'depth_model' in locals() and depth_model is not None:
         depth_model = None
 
-    logger.warning(">>> Clearing GPU memory before 3D reconstruction...")
+    logger.info("Clearing GPU memory before 3D reconstruction...")
     cleanup_all_models()
 
     # Diagnostic: log GPU memory state after cleanup (WARNING so it always shows)
