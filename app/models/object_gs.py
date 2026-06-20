@@ -405,38 +405,58 @@ class ObjectGSPipeline:
                     logger.info("Patched radii shape mismatch in render.py")
 
                 # Fix 2: gsplat >= 1.0 removed 'features' kwarg
-                # Replace 3D case: 4 returns → 3 returns + render_semantics=None
-                old_3d = (
-                    "render_colors, render_alphas, render_semantics, info = gsplat.rasterization("
-                )
-                new_3d = (
-                    "render_colors, render_alphas, info = gsplat.rasterization("
-                )
-                if old_3d in content:
-                    content = content.replace(old_3d, new_3d)
+                # Proper fix: concatenate semantics into colors, render, then split
+                if "features=semantics.detach()" in content:
+                    # 3D case: pack semantics into colors
+                    content = content.replace(
+                        "render_colors, render_alphas, render_semantics, info = gsplat.rasterization(",
+                        "_packed_colors, render_alphas, info = gsplat.rasterization(",
+                    )
+                    content = content.replace(
+                        "colors=color,",
+                        "colors=torch.cat([color, semantics.detach()], dim=-1) if semantics is not None else color,",
+                        1,  # only first occurrence (3D branch)
+                    )
                     content = content.replace(
                         "features=semantics.detach()",
-                        "# features removed (gsplat API change)",
+                        "# features packed into colors",
                     )
-                    # Add render_semantics = None after the 3D rasterization block
-                    content = content.replace(
-                        "render_mode=pc.render_mode,\n            # features removed (gsplat API change)\n        )\n    elif pc.gs_attr",
-                        "render_mode=pc.render_mode,\n            # features removed (gsplat API change)\n        )\n        render_semantics = None\n    elif pc.gs_attr",
-                    )
-                    changed = True
-                    logger.info("Patched features kwarg in render.py (3D branch)")
 
-                # Replace 2D case similarly
-                old_2d = "render_semantics,\n        info"
-                new_2d = "info"
-                if old_2d in content:
-                    content = content.replace(old_2d, new_2d, 1)  # only first occurrence in 2D branch
+                    # 2D case: same approach
                     content = content.replace(
-                        "features=semantics.detach()\n        )\n    else:",
-                        "# features removed (gsplat API change)\n        )\n        render_semantics = None\n    else:",
+                        "render_semantics,\n        info",
+                        "info",
+                        1,
                     )
+                    content = content.replace(
+                        "colors=color,\n            viewmats=viewmat[None],  # [1, 4, 4]\n            Ks=K[None],  # [1, 3, 3]\n            width=int(viewpoint_camera.image_width),\n            height=int(viewpoint_camera.image_height),            \n            backgrounds=bg_color[None] if pc.render_mode not in [\"RGB+D\", \"RGB+ED\"] \\",
+                        "colors=torch.cat([color, semantics.detach()], dim=-1) if semantics is not None else color,\n            viewmats=viewmat[None],  # [1, 4, 4]\n            Ks=K[None],  # [1, 3, 3]\n            width=int(viewpoint_camera.image_width),\n            height=int(viewpoint_camera.image_height),            \n            backgrounds=bg_color[None] if pc.render_mode not in [\"RGB+D\", \"RGB+ED\"] \\",
+                        1,
+                    )
+
+                    # After rendering, split packed output into RGB + semantics
+                    # Insert splitting code before "render_alphas = render_alphas[0]"
+                    split_code = (
+                        "\n    # Split packed output: RGB channels + semantic channels\n"
+                        "    _c = _packed_colors\n"
+                        "    if semantics is not None and _c.shape[-1] > 4:\n"
+                        "        sem_dim = semantics.shape[-1]\n"
+                        "        render_colors = _c[..., :-sem_dim]\n"
+                        "        render_semantics = _c[..., -sem_dim:]\n"
+                        "    elif semantics is not None and _c.shape[-1] > 3:\n"
+                        "        render_colors = _c[..., :3]\n"
+                        "        render_semantics = _c[..., 3:]\n"
+                        "    else:\n"
+                        "        render_colors = _c\n"
+                        "        render_semantics = None\n"
+                    )
+                    content = content.replace(
+                        "    # [1, H, W, 3] -> [3, H, W]",
+                        split_code + "    # [1, H, W, 3] -> [3, H, W]",
+                    )
+
                     changed = True
-                    logger.info("Patched features kwarg in render.py (2D branch)")
+                    logger.info("Packed semantics into colors for gsplat compatibility")
 
                 if changed:
                     render_file.write_text(content)
