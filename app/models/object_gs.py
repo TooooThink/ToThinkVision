@@ -389,79 +389,14 @@ class ObjectGSPipeline:
                 ">>> No YAML files with source_path found to patch"
             )
 
-        # Patch known bugs in gaussian_renderer/render.py
-        render_file = repo / "gaussian_renderer" / "render.py"
-        if render_file.exists():
-            try:
-                content = render_file.read_text()
-                changed = False
-
-                # Fix 1: radii shape mismatch [N, 2] → [N]
-                old1 = "visible_mask[pc._anchor_mask] = radii.squeeze(0) > 0"
-                new1 = "visible_mask[pc._anchor_mask] = radii.squeeze(0).max(dim=-1).values > 0"
-                if old1 in content:
-                    content = content.replace(old1, new1)
-                    changed = True
-                    logger.info("Patched radii shape mismatch in render.py")
-
-                # Fix 2: gsplat >= 1.0 removed 'features' kwarg
-                # Proper fix: concatenate semantics into colors, render, then split
-                if "features=semantics.detach()" in content:
-                    # 3D case: pack semantics into colors
-                    content = content.replace(
-                        "render_colors, render_alphas, render_semantics, info = gsplat.rasterization(",
-                        "_packed_colors, render_alphas, info = gsplat.rasterization(",
-                    )
-                    content = content.replace(
-                        "colors=color,",
-                        "colors=torch.cat([color, semantics.detach()], dim=-1) if semantics is not None else color,",
-                        1,  # only first occurrence (3D branch)
-                    )
-                    content = content.replace(
-                        "features=semantics.detach()",
-                        "# features packed into colors",
-                    )
-
-                    # 2D case: same approach
-                    content = content.replace(
-                        "render_semantics,\n        info",
-                        "info",
-                        1,
-                    )
-                    content = content.replace(
-                        "colors=color,\n            viewmats=viewmat[None],  # [1, 4, 4]\n            Ks=K[None],  # [1, 3, 3]\n            width=int(viewpoint_camera.image_width),\n            height=int(viewpoint_camera.image_height),            \n            backgrounds=bg_color[None] if pc.render_mode not in [\"RGB+D\", \"RGB+ED\"] \\",
-                        "colors=torch.cat([color, semantics.detach()], dim=-1) if semantics is not None else color,\n            viewmats=viewmat[None],  # [1, 4, 4]\n            Ks=K[None],  # [1, 3, 3]\n            width=int(viewpoint_camera.image_width),\n            height=int(viewpoint_camera.image_height),            \n            backgrounds=bg_color[None] if pc.render_mode not in [\"RGB+D\", \"RGB+ED\"] \\",
-                        1,
-                    )
-
-                    # After rendering, split packed output into RGB + semantics
-                    # Insert splitting code before "render_alphas = render_alphas[0]"
-                    split_code = (
-                        "\n    # Split packed output: RGB channels + semantic channels\n"
-                        "    _c = _packed_colors\n"
-                        "    if semantics is not None and _c.shape[-1] > 4:\n"
-                        "        sem_dim = semantics.shape[-1]\n"
-                        "        render_colors = _c[..., :-sem_dim]\n"
-                        "        render_semantics = _c[..., -sem_dim:]\n"
-                        "    elif semantics is not None and _c.shape[-1] > 3:\n"
-                        "        render_colors = _c[..., :3]\n"
-                        "        render_semantics = _c[..., 3:]\n"
-                        "    else:\n"
-                        "        render_colors = _c\n"
-                        "        render_semantics = None\n"
-                    )
-                    content = content.replace(
-                        "    # [1, H, W, 3] -> [3, H, W]",
-                        split_code + "    # [1, H, W, 3] -> [3, H, W]",
-                    )
-
-                    changed = True
-                    logger.info("Packed semantics into colors for gsplat compatibility")
-
-                if changed:
-                    render_file.write_text(content)
-            except Exception as e:
-                logger.warning("Failed to patch render.py: %s", e)
+        # Copy patched render.py (fixes radii shape, gsplat features API, backgrounds)
+        patched_render = Path(__file__).parent / "objectgs_patches" / "render.py"
+        target_render = repo / "gaussian_renderer" / "render.py"
+        if patched_render.exists() and target_render.exists():
+            import filecmp
+            if not filecmp.cmp(str(patched_render), str(target_render), shallow=False):
+                shutil.copy2(str(patched_render), str(target_render))
+                logger.info("Copied patched render.py → %s", target_render)
 
     def train(
         self,
