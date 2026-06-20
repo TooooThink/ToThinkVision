@@ -602,6 +602,64 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         PILImage.fromarray(label_img, mode="L").save(
             str(objectgs_masks_dir / f"{frame_idx:06d}.png")
         )
+
+    # Temporal interpolation: fill remaining gaps using tracker bbox to shift masks.
+    # If an object is occluded but still moving, we shift the last known mask
+    # to the tracker's predicted position instead of using a stale mask.
+    covered = sorted(frames_by_idx.keys())
+    if covered and len(covered) < total_frames:
+        # Build per-object bbox timeline from per_frame_obj_data + tracker
+        obj_bbox_timeline = defaultdict(dict)  # obj_id → {frame_idx: bbox}
+        for frame_entry in per_frame_obj_data:
+            for obj_info in frame_entry["objects"]:
+                obj_bbox_timeline[obj_info["id"]][frame_entry["frame_idx"]] = obj_info["bbox"]
+
+        # Build per-object mask timeline
+        obj_mask_timeline = defaultdict(dict)  # obj_id → {frame_idx: mask_array}
+        for fidx, obj_masks in frames_by_idx.items():
+            for obj_id, mask in obj_masks:
+                if mask is not None:
+                    obj_mask_timeline[obj_id][fidx] = mask
+
+        h, w = video_meta["height"], video_meta["width"]
+
+        for fidx in range(total_frames):
+            if fidx in frames_by_idx:
+                continue  # already has real masks
+            label_img = np.zeros((h, w), dtype=np.uint8)
+            for label, (obj_id, _) in enumerate(
+                # Use objects from the nearest covered frame
+                frames_by_idx[min(covered, key=lambda x: abs(x - fidx))], start=1
+            ):
+                # Find nearest frame where this object has a mask
+                obj_frames = sorted(obj_mask_timeline[obj_id].keys())
+                if not obj_frames:
+                    continue
+                nearest_mask_frame = min(obj_frames, key=lambda x: abs(x - fidx))
+                base_mask = obj_mask_timeline[obj_id][nearest_mask_frame]
+
+                # Get bbox offset: current predicted bbox vs mask frame bbox
+                cur_bbox = obj_bbox_timeline[obj_id].get(fidx)
+                base_bbox = obj_bbox_timeline[obj_id].get(nearest_mask_frame)
+                if cur_bbox and base_bbox and len(cur_bbox) == 4 and len(base_bbox) == 4:
+                    dx = int(cur_bbox[0] - base_bbox[0])
+                    dy = int(cur_bbox[1] - base_bbox[1])
+                    if dx != 0 or dy != 0:
+                        shifted = np.zeros_like(base_mask)
+                        src_y = slice(max(0, -dy), min(h, h - dy))
+                        dst_y = slice(max(0, dy), min(h, h + dy))
+                        src_x = slice(max(0, -dx), min(w, w - dx))
+                        dst_x = slice(max(0, dx), min(w, w + dx))
+                        shifted[dst_y, dst_x] = base_mask[src_y, src_x]
+                        base_mask = shifted
+
+                label_img[base_mask > 0] = label
+            PILImage.fromarray(label_img, mode="L").save(
+                str(objectgs_masks_dir / f"{fidx:06d}.png")
+            )
+        final_count = len(list(objectgs_masks_dir.glob("*.png")))
+        logger.info("ObjectGS masks: %d/%d frames (interpolated %d gaps with bbox-shifted masks)",
+                     final_count, total_frames, total_frames - len(covered))
     logger.info("Generated %d ObjectGS label masks in %s",
                  len(frames_by_idx), objectgs_masks_dir)
     del frames_by_idx  # free intermediate data
