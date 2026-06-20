@@ -389,18 +389,57 @@ class ObjectGSPipeline:
                 ">>> No YAML files with source_path found to patch"
             )
 
-        # Patch radii shape mismatch in gaussian_renderer/render.py
-        # ObjectGS's rasterizer returns radii with shape [N, 2] but the code expects [N]
+        # Patch known bugs in gaussian_renderer/render.py
         render_file = repo / "gaussian_renderer" / "render.py"
         if render_file.exists():
             try:
                 content = render_file.read_text()
-                old_line = "visible_mask[pc._anchor_mask] = radii.squeeze(0) > 0"
-                new_line = "visible_mask[pc._anchor_mask] = radii.squeeze(0).max(dim=-1).values > 0"
-                if old_line in content:
-                    content = content.replace(old_line, new_line)
-                    render_file.write_text(content)
+                changed = False
+
+                # Fix 1: radii shape mismatch [N, 2] → [N]
+                old1 = "visible_mask[pc._anchor_mask] = radii.squeeze(0) > 0"
+                new1 = "visible_mask[pc._anchor_mask] = radii.squeeze(0).max(dim=-1).values > 0"
+                if old1 in content:
+                    content = content.replace(old1, new1)
+                    changed = True
                     logger.info("Patched radii shape mismatch in render.py")
+
+                # Fix 2: gsplat >= 1.0 removed 'features' kwarg
+                # Replace 3D case: 4 returns → 3 returns + render_semantics=None
+                old_3d = (
+                    "render_colors, render_alphas, render_semantics, info = gsplat.rasterization("
+                )
+                new_3d = (
+                    "render_colors, render_alphas, info = gsplat.rasterization("
+                )
+                if old_3d in content:
+                    content = content.replace(old_3d, new_3d)
+                    content = content.replace(
+                        "features=semantics.detach()",
+                        "# features removed (gsplat API change)",
+                    )
+                    # Add render_semantics = None after the 3D rasterization block
+                    content = content.replace(
+                        "render_mode=pc.render_mode,\n            # features removed (gsplat API change)\n        )\n    elif pc.gs_attr",
+                        "render_mode=pc.render_mode,\n            # features removed (gsplat API change)\n        )\n        render_semantics = None\n    elif pc.gs_attr",
+                    )
+                    changed = True
+                    logger.info("Patched features kwarg in render.py (3D branch)")
+
+                # Replace 2D case similarly
+                old_2d = "render_semantics,\n        info"
+                new_2d = "info"
+                if old_2d in content:
+                    content = content.replace(old_2d, new_2d, 1)  # only first occurrence in 2D branch
+                    content = content.replace(
+                        "features=semantics.detach()\n        )\n    else:",
+                        "# features removed (gsplat API change)\n        )\n        render_semantics = None\n    else:",
+                    )
+                    changed = True
+                    logger.info("Patched features kwarg in render.py (2D branch)")
+
+                if changed:
+                    render_file.write_text(content)
             except Exception as e:
                 logger.warning("Failed to patch render.py: %s", e)
 
