@@ -389,6 +389,21 @@ class ObjectGSPipeline:
                 ">>> No YAML files with source_path found to patch"
             )
 
+        # Patch radii shape mismatch in gaussian_renderer/render.py
+        # ObjectGS's rasterizer returns radii with shape [N, 2] but the code expects [N]
+        render_file = repo / "gaussian_renderer" / "render.py"
+        if render_file.exists():
+            try:
+                content = render_file.read_text()
+                old_line = "visible_mask[pc._anchor_mask] = radii.squeeze(0) > 0"
+                new_line = "visible_mask[pc._anchor_mask] = radii.squeeze(0).max(dim=-1).values > 0"
+                if old_line in content:
+                    content = content.replace(old_line, new_line)
+                    render_file.write_text(content)
+                    logger.info("Patched radii shape mismatch in render.py")
+            except Exception as e:
+                logger.warning("Failed to patch render.py: %s", e)
+
     def train(
         self,
         frame_dir: Path,
