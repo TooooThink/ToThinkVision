@@ -474,6 +474,20 @@ class ObjectGSPipeline:
                     dummy_mask = PILImage.new("L", (w, h), 255)
                     dummy_mask.save(str(mask_dst))
             logger.warning("No real masks available, using dummy all-white masks")
+        else:
+            # Fill gaps: frames without real masks get dummy masks
+            from PIL import Image as PILImage
+            gaps_filled = 0
+            for i, fp in enumerate(frame_paths):
+                mask_dst = mask_dir / f"{i:06d}.png"
+                if not mask_dst.exists():
+                    img = PILImage.open(fp)
+                    w, h = img.size
+                    dummy_mask = PILImage.new("L", (w, h), 255)
+                    dummy_mask.save(str(mask_dst))
+                    gaps_filled += 1
+            if gaps_filled:
+                logger.warning("Filled %d frames with dummy masks (no SAM3 mask available)", gaps_filled)
 
         # Run COLMAP on the images/ subdirectory so extr.name = "000000.jpg".
         # ObjectGS then does os.path.join(source_path/images/, extr.name).

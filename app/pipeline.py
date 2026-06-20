@@ -536,27 +536,43 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         _merge_propagated_masks(all_frame_objects, propagation_results)
 
     # ─── Generate per-frame label masks for ObjectGS ─────────
-    # Group propagation results by frame → create label images
-    # where pixel value = object label (1, 2, 3...) for per-object 3DGS.
+    # Combine propagation results + per_frame_obj_data to cover ALL frames.
+    # pixel value = object label (1, 2, 3...) for per-object 3DGS.
     objectgs_masks_dir = img_dir / "objectgs_masks"
+    objectgs_masks_dir.mkdir(parents=True, exist_ok=True)
+    from collections import defaultdict
+    from PIL import Image as PILImage
+
+    frames_by_idx = defaultdict(list)
+
+    # From propagation (covers most frames)
     if propagation_results:
-        objectgs_masks_dir.mkdir(parents=True, exist_ok=True)
-        from collections import defaultdict
-        from PIL import Image as PILImage
-        frames_by_idx = defaultdict(list)
         for frame_idx, obj_id, mask in propagation_results:
             frames_by_idx[frame_idx].append((obj_id, mask))
-        for frame_idx, obj_masks in frames_by_idx.items():
-            h, w = obj_masks[0][1].shape
-            label_img = np.zeros((h, w), dtype=np.uint8)
-            for label, (obj_id, mask) in enumerate(obj_masks, start=1):
+
+    # From initial detection (covers keyframe and frames missed by propagation)
+    for frame_entry in per_frame_obj_data:
+        fidx = frame_entry["frame_idx"]
+        if fidx in frames_by_idx:
+            continue  # already have propagation masks for this frame
+        for obj_info in frame_entry["objects"]:
+            mask = obj_info.get("mask")
+            if mask is not None:
+                frames_by_idx[fidx].append((obj_info["id"], mask))
+
+    # Generate label images for all frames with masks
+    for frame_idx, obj_masks in frames_by_idx.items():
+        h, w = obj_masks[0][1].shape[:2]
+        label_img = np.zeros((h, w), dtype=np.uint8)
+        for label, (obj_id, mask) in enumerate(obj_masks, start=1):
+            if mask is not None and mask.shape[:2] == (h, w):
                 label_img[mask > 0] = label
-            PILImage.fromarray(label_img, mode="L").save(
-                str(objectgs_masks_dir / f"{frame_idx:06d}.png")
-            )
-        logger.info("Generated %d ObjectGS label masks in %s",
-                     len(frames_by_idx), objectgs_masks_dir)
-        del frames_by_idx  # free intermediate data
+        PILImage.fromarray(label_img, mode="L").save(
+            str(objectgs_masks_dir / f"{frame_idx:06d}.png")
+        )
+    logger.info("Generated %d ObjectGS label masks in %s",
+                 len(frames_by_idx), objectgs_masks_dir)
+    del frames_by_idx  # free intermediate data
 
     # Free propagation results (large numpy mask arrays) — already consumed above
     if 'propagation_results' in locals():
