@@ -791,6 +791,16 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     # Diagnostic: log GPU memory state after cleanup (WARNING so it always shows)
     import torch
     if torch.cuda.is_available():
+        # After Spann3R segfault, cuSOLVER may be corrupted.
+        # Switch linalg backend to avoid CUSOLVER_STATUS_INTERNAL_ERROR.
+        for backend in ("default", "magma", "cusolver"):
+            try:
+                torch.backends.cuda.preferred_linalg_library(backend)
+                break
+            except Exception:
+                continue
+        # Reset CUDA context
+        _check_gpu_health()
         free, total = torch.cuda.mem_get_info()
         logger.warning(
             ">>> GPU after cleanup: %.1f GB free / %.1f GB total (%.1f%% free)",
