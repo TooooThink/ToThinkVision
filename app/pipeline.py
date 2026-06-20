@@ -560,6 +560,38 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
             if mask is not None:
                 frames_by_idx[fidx].append((obj_info["id"], mask))
 
+    # Fill gaps: run SAM3 image segmentation on frames without masks
+    covered_frames = set(frames_by_idx.keys())
+    total_frames = len(frame_paths)
+    gap_frames = [i for i in range(total_frames) if i not in covered_frames]
+
+    if gap_frames and sam3 is not None:
+        logger.info("Filling %d frames without masks via SAM3 image segmentation...", len(gap_frames))
+        # Build a mapping from track_id to latest known bbox
+        track_bboxes = {}
+        for frame_entry in per_frame_obj_data:
+            for obj_info in frame_entry["objects"]:
+                track_bboxes[obj_info["id"]] = obj_info["bbox"]
+
+        for fidx in gap_frames:
+            if fidx >= len(frame_paths):
+                continue
+            fpath = frame_paths[fidx]
+            img, _ = preprocess_image(fpath)
+            boxes = np.array([b for b in track_bboxes.values() if len(b) == 4]) if track_bboxes else None
+            if boxes is None or len(boxes) == 0:
+                continue
+            # Convert [x, y, w, h] to [x1, y1, x2, y2]
+            boxes_xyxy = np.array([[b[0], b[1], b[0]+b[2], b[1]+b[3]] for b in boxes])
+            seg_results = sam3.predict(img, boxes=boxes_xyxy)
+            track_ids = list(track_bboxes.keys())
+            for j, seg in enumerate(seg_results):
+                mask = seg.get("mask")
+                if mask is not None and j < len(track_ids):
+                    frames_by_idx[fidx].append((track_ids[j], mask))
+        logger.info("SAM3 gap fill complete, now have masks for %d/%d frames",
+                     len(frames_by_idx), total_frames)
+
     # Generate label images for all frames with masks
     for frame_idx, obj_masks in frames_by_idx.items():
         h, w = obj_masks[0][1].shape[:2]
