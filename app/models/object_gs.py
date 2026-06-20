@@ -333,7 +333,7 @@ class ObjectGSPipeline:
 
         logger.info("Converted points3D.bin → points3D.ply (%d points)", num_points)
 
-    def _patch_training_scripts(self, scene_dir: Path) -> None:
+    def _patch_training_scripts(self, scene_dir: Path, num_iterations: int = 5000) -> None:
         """Patch hardcoded dataset paths in ObjectGS source files.
 
         The ObjectGS repo has ``datasets/replica`` hardcoded in YAML configs.
@@ -372,6 +372,12 @@ class ObjectGSPipeline:
                 patched = source_path_pattern.sub(
                     f'source_path: {abs_data_dir}',
                     content,
+                )
+                # Override training iterations for faster runs
+                iterations_pattern = re.compile(r'(iterations\s*:\s*)[\d_]+')
+                patched = iterations_pattern.sub(
+                    f'\\g<1>{num_iterations:_}',
+                    patched,
                 )
                 if patched != content:
                     fpath.write_text(patched)
@@ -503,7 +509,7 @@ class ObjectGSPipeline:
         self._run_colmap_for_scene(scene_dir, images_dir, frame_paths)
 
         # Patch hardcoded dataset paths in training scripts and configs
-        self._patch_training_scripts(scene_dir)
+        self._patch_training_scripts(scene_dir, num_iterations=num_iterations)
 
         # Run training
         script = "train_2d.sh" if use_2dgs else "train_3d.sh"
@@ -518,7 +524,7 @@ class ObjectGSPipeline:
                 cwd=str(self.repo_path),
                 capture_output=True,
                 text=True,
-                timeout=3600,  # 1 hour timeout
+                timeout=7200,  # 2 hour timeout
             )
 
             if result.returncode != 0:
