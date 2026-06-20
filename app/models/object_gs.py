@@ -389,7 +389,7 @@ class ObjectGSPipeline:
                 ">>> No YAML files with source_path found to patch"
             )
 
-        # Copy patched render.py (fixes radii shape, gsplat features API, backgrounds)
+        # Copy patched render.py to ObjectGS repo (fixes gsplat API compatibility)
         patched_render = Path(__file__).parent / "objectgs_patches" / "render.py"
         target_render = repo / "gaussian_renderer" / "render.py"
         if patched_render.exists() and target_render.exists():
