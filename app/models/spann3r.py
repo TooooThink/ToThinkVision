@@ -137,6 +137,20 @@ class Spann3RReconstructor:
                 "and set SPANN3R_PATH env var, or place under models/Spann3R/"
             )
 
+        # Check available VRAM before running — Spann3R (DUSt3R ViT-Large) needs ~16 GB.
+        # Without this check, CUDA OOM causes a C++ segfault (null pointer dereference)
+        # that corrupts the entire process's CUDA context.
+        import torch
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info()
+            free_gb = free / (1024 ** 3)
+            min_required_gb = 16
+            if free_gb < min_required_gb:
+                raise RuntimeError(
+                    f"Spann3R skipped: only {free_gb:.1f} GB free, needs ~{min_required_gb} GB. "
+                    f"Falling back to MASt3R/VGGT."
+                )
+
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="spann3r_"))
 
