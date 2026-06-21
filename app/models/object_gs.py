@@ -22,6 +22,19 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _isolated_gpu_env() -> dict:
+    """Build env dict that assigns subprocess to GPU 1 (isolated from main pipeline).
+
+    After Spann3R segfaults on GPU 0, cuSOLVER on that GPU is corrupted.
+    Running ObjectGS on GPU 1 gives it a clean CUDA context.
+    """
+    env = os.environ.copy()
+    import torch as _torch
+    if _torch.cuda.is_available() and _torch.cuda.device_count() > 1:
+        env["CUDA_VISIBLE_DEVICES"] = "1"
+    return env
+
+
 def _find_colmap() -> str:
     """Find the colmap binary.
 
@@ -525,6 +538,7 @@ class ObjectGSPipeline:
                 capture_output=True,
                 text=True,
                 timeout=7200,  # 2 hour timeout
+                env=_isolated_gpu_env(),
             )
 
             if result.returncode != 0:
@@ -600,6 +614,7 @@ class ObjectGSPipeline:
                 capture_output=True,
                 text=True,
                 timeout=600,
+                env=_isolated_gpu_env(),
             )
 
             if result.returncode != 0:
@@ -642,6 +657,7 @@ class ObjectGSPipeline:
                 capture_output=True,
                 text=True,
                 timeout=600,
+                env=_isolated_gpu_env(),
             )
 
             if result.returncode != 0:
