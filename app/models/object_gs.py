@@ -547,6 +547,30 @@ class ObjectGSPipeline:
             "output_dir": output_dir,
         }
 
+    def _find_model_path(self, output_dir: Path) -> Path | None:
+        """Find the actual ObjectGS training output directory.
+
+        ObjectGS saves to {repo}/outputs/replica/objectgs/scene/TIMESTAMP/.
+        Returns the most recent timestamped directory, or None if not found.
+        """
+        # Search in ObjectGS repo's outputs directory
+        outputs_base = self.repo_path / "outputs"
+        for scene_dir in outputs_base.rglob("scene"):
+            if scene_dir.is_dir():
+                # Find timestamped subdirectories
+                timestamped = sorted(
+                    [d for d in scene_dir.iterdir() if d.is_dir()],
+                    key=lambda d: d.stat().st_mtime,
+                    reverse=True,
+                )
+                for ts_dir in timestamped:
+                    if (ts_dir / "config.yaml").exists():
+                        return ts_dir
+        # Fallback: check if config.yaml is directly in output_dir
+        if (output_dir / "config.yaml").exists():
+            return output_dir
+        return None
+
     def _export_object_meshes(self, output_dir: Path) -> dict[str, Path]:
         """Export per-object meshes from trained model."""
         export_script = self.repo_path / "export_object_mesh.py"
@@ -555,13 +579,21 @@ class ObjectGSPipeline:
             logger.warning("ObjectGS export script not found")
             return {}
 
+        # Find the actual model directory (ObjectGS saves to repo/outputs/...)
+        model_path = self._find_model_path(output_dir)
+        if model_path is None:
+            logger.warning("ObjectGS model output not found (no config.yaml)")
+            return {}
+
+        logger.info("ObjectGS model path: %s", model_path)
+
         try:
             # Export all objects (label_id = -1)
             result = subprocess.run(
                 [
                     "python",
                     str(export_script),
-                    "-m", str(output_dir),
+                    "-m", str(model_path),
                     "--query_label_id", "-1",
                 ],
                 cwd=str(self.repo_path),
@@ -595,12 +627,16 @@ class ObjectGSPipeline:
         if not export_script.exists():
             return None
 
+        model_path = self._find_model_path(output_dir)
+        if model_path is None:
+            return None
+
         try:
             result = subprocess.run(
                 [
                     "python",
                     str(export_script),
-                    "-m", str(output_dir),
+                    "-m", str(model_path),
                 ],
                 cwd=str(self.repo_path),
                 capture_output=True,
