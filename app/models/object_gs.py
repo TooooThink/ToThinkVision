@@ -23,16 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 def _isolated_gpu_env() -> dict:
-    """Build env dict that assigns subprocess to GPU 1 (isolated from main pipeline).
+    """Build env dict for subprocess — uses default GPU (no isolation needed).
 
-    After Spann3R segfaults on GPU 0, cuSOLVER on that GPU is corrupted.
-    Running ObjectGS on GPU 1 gives it a clean CUDA context.
+    Spann3R runs on a separate GPU (handled in spann3r.py).
+    ObjectGS and other subprocesses stay on GPU 0 with clean CUDA context.
     """
-    env = os.environ.copy()
-    import torch as _torch
-    if _torch.cuda.is_available() and _torch.cuda.device_count() > 1:
-        env["CUDA_VISIBLE_DEVICES"] = "1"
-    return env
+    return os.environ.copy()
 
 
 def _find_colmap() -> str:
