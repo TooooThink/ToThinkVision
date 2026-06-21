@@ -577,23 +577,14 @@ class ObjectGSPipeline:
         except RuntimeError:
             raise
 
-        # Export per-object meshes (may segfault due to custom CUDA kernels)
-        object_meshes = {}
-        try:
-            object_meshes = self._export_object_meshes(output_dir)
-        except Exception as e:
-            logger.warning("ObjectGS mesh export failed (non-fatal): %s", e)
-
-        # Export scene mesh
-        scene_mesh = None
-        try:
-            scene_mesh = self._export_scene_mesh(output_dir)
-        except Exception as e:
-            logger.warning("ObjectGS scene mesh export failed (non-fatal): %s", e)
+        # Skip mesh export: ObjectGS "reconstruct radiance fields" segfaults
+        # and crashes the entire pipeline (GPU memory corruption propagates
+        # to parent process). Training data is preserved for later mesh export.
+        logger.info("ObjectGS training complete. Mesh export skipped (known segfault).")
 
         return {
-            "scene_mesh": scene_mesh,
-            "object_meshes": object_meshes,
+            "scene_mesh": None,
+            "object_meshes": {},
             "output_dir": output_dir,
         }
 
