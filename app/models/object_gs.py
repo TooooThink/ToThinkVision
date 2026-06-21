@@ -23,12 +23,14 @@ logger = logging.getLogger(__name__)
 
 
 def _isolated_gpu_env() -> dict:
-    """Build env dict for subprocess — uses default GPU.
+    """Build env dict for ObjectGS subprocesses.
 
-    cuSOLVER issues are fixed directly in cameras.py (CPU inverse),
-    so no GPU isolation is needed.
+    Sets TORCH_CUDA_ARCH_LIST to A100 (sm_80) to avoid JIT compilation issues
+    with custom CUDA kernels during mesh reconstruction.
     """
-    return os.environ.copy()
+    env = os.environ.copy()
+    env.setdefault("TORCH_CUDA_ARCH_LIST", "8.0")
+    return env
 
 
 def _find_colmap() -> str:
