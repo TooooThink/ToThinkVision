@@ -410,6 +410,27 @@ class ObjectGSPipeline:
                 ">>> No YAML files with source_path found to patch"
             )
 
+        # ------------------------------------------------------------------
+        # Patch train.py: fix hardcoded camera index [10] that crashes when
+        # fewer than 11 cameras are reconstructed by COLMAP.
+        # Replace `.copy()[10]` → `.copy()[0]` (always use first camera).
+        # ------------------------------------------------------------------
+        train_py = repo / "train.py"
+        if train_py.exists():
+            try:
+                content = train_py.read_text(errors="ignore")
+                # Match patterns like:  .copy()[10]  or  .copy()[123]
+                fixed = re.sub(
+                    r'(\.copy\(\))\[\d+\]',
+                    r'\1[0]',
+                    content,
+                )
+                if fixed != content:
+                    train_py.write_text(fixed)
+                    logger.info("Patched train.py: hardcoded camera index → [0]")
+            except Exception as e:
+                logger.warning("Could not patch train.py camera index: %s", e)
+
         # Copy patched files to ObjectGS repo
         patches_dir = Path(__file__).parent / "objectgs_patches"
         import filecmp
