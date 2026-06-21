@@ -25,11 +25,15 @@ logger = logging.getLogger(__name__)
 def _isolated_gpu_env() -> dict:
     """Build env dict for ObjectGS subprocesses.
 
-    Sets TORCH_CUDA_ARCH_LIST to A100 (sm_80) to avoid JIT compilation issues
-    with custom CUDA kernels during mesh reconstruction.
+    - Sets TORCH_CUDA_ARCH_LIST to A100 (sm_80) to avoid JIT compilation issues.
+    - Assigns export subprocesses to GPU 1 to isolate CUDA context.
+      If mesh export segfaults, GPU 0 (main pipeline) stays clean.
     """
     env = os.environ.copy()
     env.setdefault("TORCH_CUDA_ARCH_LIST", "8.0")
+    import torch as _torch
+    if _torch.cuda.is_available() and _torch.cuda.device_count() > 1:
+        env["CUDA_VISIBLE_DEVICES"] = "1"
     return env
 
 
@@ -552,11 +556,19 @@ class ObjectGSPipeline:
         except RuntimeError:
             raise
 
-        # Export per-object meshes
-        object_meshes = self._export_object_meshes(output_dir)
+        # Export per-object meshes (may segfault due to custom CUDA kernels)
+        object_meshes = {}
+        try:
+            object_meshes = self._export_object_meshes(output_dir)
+        except Exception as e:
+            logger.warning("ObjectGS mesh export failed (non-fatal): %s", e)
 
         # Export scene mesh
-        scene_mesh = self._export_scene_mesh(output_dir)
+        scene_mesh = None
+        try:
+            scene_mesh = self._export_scene_mesh(output_dir)
+        except Exception as e:
+            logger.warning("ObjectGS scene mesh export failed (non-fatal): %s", e)
 
         return {
             "scene_mesh": scene_mesh,
