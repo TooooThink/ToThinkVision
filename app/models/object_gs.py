@@ -23,16 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 def _isolated_gpu_env() -> dict:
-    """Build env dict that runs subprocess on GPU 1 if available.
+    """Build env dict for subprocess — uses default GPU.
 
-    After ObjectGS training on GPU 0, cuSOLVER may be corrupted.
-    Running export on GPU 1 (fresh process, clean context) avoids this.
+    cuSOLVER issues are fixed directly in cameras.py (CPU inverse),
+    so no GPU isolation is needed.
     """
-    env = os.environ.copy()
-    import torch as _torch
-    if _torch.cuda.is_available() and _torch.cuda.device_count() > 1:
-        env["CUDA_VISIBLE_DEVICES"] = "1"
-    return env
+    return os.environ.copy()
 
 
 def _find_colmap() -> str:
@@ -408,14 +404,19 @@ class ObjectGSPipeline:
                 ">>> No YAML files with source_path found to patch"
             )
 
-        # Copy patched render.py to ObjectGS repo (fixes gsplat API compatibility)
-        patched_render = Path(__file__).parent / "objectgs_patches" / "render.py"
-        target_render = repo / "gaussian_renderer" / "render.py"
-        if patched_render.exists() and target_render.exists():
-            import filecmp
-            if not filecmp.cmp(str(patched_render), str(target_render), shallow=False):
-                shutil.copy2(str(patched_render), str(target_render))
-                logger.info("Copied patched render.py → %s", target_render)
+        # Copy patched files to ObjectGS repo
+        patches_dir = Path(__file__).parent / "objectgs_patches"
+        import filecmp
+        for patch_name, target_rel in [
+            ("render.py", "gaussian_renderer/render.py"),
+            ("cameras.py", "scene/cameras.py"),
+        ]:
+            patched = patches_dir / patch_name
+            target = repo / target_rel
+            if patched.exists() and target.exists():
+                if not filecmp.cmp(str(patched), str(target), shallow=False):
+                    shutil.copy2(str(patched), str(target))
+                    logger.info("Copied patched %s → %s", patch_name, target)
 
     def train(
         self,
