@@ -31,10 +31,25 @@ _SPANN3R_COMPAT_DIR = str(Path(__file__).parent / "_spann3r_compat")
 
 
 def _build_spann3r_env() -> dict[str, str]:
-    """Build subprocess env with PYTHONPATH including our torch/numpy compat patch."""
+    """Build subprocess env with PYTHONPATH including our torch/numpy compat patch.
+
+    Also assigns Spann3R to a separate GPU to isolate its CUDA context.
+    If Spann3R segfaults (e.g. OOM), the parent process's CUDA state stays clean.
+    """
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = _SPANN3R_COMPAT_DIR + (os.pathsep + existing if existing else "")
+
+    # Assign a different GPU than the parent to fully isolate CUDA contexts.
+    # Parent uses CUDA_VISIBLE_DEVICES (default: GPU 0). Spann3R gets GPU 1.
+    # If only one GPU is available, Spann3R shares it but the segfault damage
+    # is still limited because the child process gets its own context handle.
+    import torch
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        spann3r_gpu = "1"
+        env["CUDA_VISIBLE_DEVICES"] = spann3r_gpu
+        logger.info("Spann3R subprocess assigned to GPU %s (isolated CUDA context)", spann3r_gpu)
+
     return env
 
 
