@@ -30,29 +30,6 @@ logger = logging.getLogger(__name__)
 _SPANN3R_COMPAT_DIR = str(Path(__file__).parent / "_spann3r_compat")
 
 
-def _build_spann3r_env() -> dict[str, str]:
-    """Build subprocess env with PYTHONPATH including our torch/numpy compat patch.
-
-    Also assigns Spann3R to a separate GPU to isolate its CUDA context.
-    If Spann3R segfaults (e.g. OOM), the parent process's CUDA state stays clean.
-    """
-    env = os.environ.copy()
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = _SPANN3R_COMPAT_DIR + (os.pathsep + existing if existing else "")
-
-    # Assign a different GPU than the parent to fully isolate CUDA contexts.
-    # Parent uses CUDA_VISIBLE_DEVICES (default: GPU 0). Spann3R gets GPU 1.
-    # If only one GPU is available, Spann3R shares it but the segfault damage
-    # is still limited because the child process gets its own context handle.
-    import torch
-    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-        spann3r_gpu = "1"
-        env["CUDA_VISIBLE_DEVICES"] = spann3r_gpu
-        logger.info("Spann3R subprocess assigned to GPU %s (isolated CUDA context)", spann3r_gpu)
-
-    return env
-
-
 class Spann3RReconstructor:
     """Wrapper for Spann3R 3D reconstruction with spatial memory.
 
@@ -113,6 +90,24 @@ class Spann3RReconstructor:
 
         return None
 
+    def _build_spann3r_env(self) -> dict[str, str]:
+        """Build subprocess env with PYTHONPATH including our torch/numpy compat patch.
+
+        Also assigns Spann3R to a specific GPU to isolate its CUDA context.
+        If Spann3R segfaults (e.g. OOM), other GPUs' CUDA state stays clean.
+        """
+        env = os.environ.copy()
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = _SPANN3R_COMPAT_DIR + (os.pathsep + existing if existing else "")
+
+        # Assign Spann3R to the GPU selected during reconstruct() VRAM check.
+        spann3r_gpu = getattr(self, '_spann3r_gpu', None)
+        if spann3r_gpu is not None:
+            env["CUDA_VISIBLE_DEVICES"] = str(spann3r_gpu)
+            logger.info("Spann3R subprocess assigned to GPU %d (isolated CUDA context)", spann3r_gpu)
+
+        return env
+
     def reconstruct(
         self,
         frames_dir: Path,
@@ -142,14 +137,28 @@ class Spann3RReconstructor:
         # that corrupts the entire process's CUDA context.
         import torch
         if torch.cuda.is_available():
-            free, total = torch.cuda.mem_get_info()
-            free_gb = free / (1024 ** 3)
             min_required_gb = 16
-            if free_gb < min_required_gb:
+
+            # Find the GPU with the most free memory
+            best_gpu = 0
+            best_free = 0
+            for gpu_id in range(torch.cuda.device_count()):
+                free, _ = torch.cuda.mem_get_info(gpu_id)
+                free_gb = free / (1024 ** 3)
+                if free_gb > best_free:
+                    best_free = free_gb
+                    best_gpu = gpu_id
+
+            if best_free < min_required_gb:
                 raise RuntimeError(
-                    f"Spann3R skipped: only {free_gb:.1f} GB free, needs ~{min_required_gb} GB. "
-                    f"Falling back to MASt3R/VGGT."
+                    f"Spann3R skipped: max {best_free:.1f} GB free across all GPUs, "
+                    f"needs ~{min_required_gb} GB. Falling back to MASt3R/VGGT."
                 )
+
+            # Assign Spann3R to the GPU with the most free memory.
+            # This isolates its CUDA context — if it segfaults, other GPUs are unaffected.
+            self._spann3r_gpu = best_gpu
+            logger.info("Spann3R assigned to GPU %d (%.1f GB free)", best_gpu, best_free)
 
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="spann3r_"))
@@ -199,7 +208,7 @@ class Spann3RReconstructor:
                 capture_output=True,
                 text=True,
                 timeout=1800,  # 30 minute timeout
-                env=_build_spann3r_env(),  # inject PYTHONPATH with torch __array__ patch
+                env=self._build_spann3r_env(),  # inject PYTHONPATH + GPU isolation
             )
 
             if result.returncode != 0:
