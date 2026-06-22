@@ -552,9 +552,9 @@ class ObjectGSPipeline:
         # Patch hardcoded dataset paths in training scripts and configs
         self._patch_training_scripts(scene_dir, num_iterations=num_iterations)
 
-        # Run training in a forked child process for crash isolation.
-        # If the training subprocess segfaults (GPU memory corruption),
-        # the forked child dies but the parent survives.
+        # Run training in a separate process group for GPU isolation.
+        # start_new_session=True creates a new session/process group,
+        # preventing CUDA context sharing with the parent process.
         script = "train_2d.sh" if use_2dgs else "train_3d.sh"
         script_path = self.repo_path / script
 
@@ -564,34 +564,31 @@ class ObjectGSPipeline:
         training_ok = False
         training_error = ""
 
-        pid = os.fork()
-        if pid == 0:
-            # Child process: run training and exit
-            try:
-                env = _isolated_gpu_env()
-                result = subprocess.run(
-                    ["bash", str(script_path), str(data_dir)],
-                    cwd=str(self.repo_path),
-                    capture_output=False,  # let output go to stdout/stderr
-                    timeout=7200,
-                    env=env,
-                )
-                os._exit(result.returncode)
-            except Exception:
-                os._exit(1)
-        else:
-            # Parent process: wait for child
-            import signal
-            _, status = os.waitpid(pid, 0)
-            if os.WIFEXITED(status):
-                exit_code = os.WEXITSTATUS(status)
-                if exit_code == 0:
-                    training_ok = True
-                else:
-                    training_error = f"ObjectGS training failed (exit {exit_code})"
-            elif os.WIFSIGNALED(status):
-                sig = os.WTERMSIG(status)
-                training_error = f"ObjectGS training killed by signal {sig} (likely segfault/OOM)"
+        try:
+            env = _isolated_gpu_env()
+            proc = subprocess.Popen(
+                ["bash", str(script_path), str(data_dir)],
+                cwd=str(self.repo_path),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                start_new_session=True,  # new process group = better isolation
+            )
+            stdout, _ = proc.communicate(timeout=7200)
+
+            if proc.returncode == 0:
+                training_ok = True
+                logger.info("ObjectGS training succeeded")
+            else:
+                training_error = f"ObjectGS training failed (exit {proc.returncode})"
+                if stdout:
+                    logger.warning("Training output:\n%s", stdout.decode('utf-8', errors='replace')[-2000:])
+
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            training_error = "ObjectGS training timed out"
+        except Exception as e:
+            training_error = f"ObjectGS training exception: {e}"
 
         if not training_ok:
             logger.warning("ObjectGS training failed (non-fatal): %s", training_error)
@@ -601,6 +598,18 @@ class ObjectGSPipeline:
                 "object_meshes": {},
                 "output_dir": output_dir,
             }
+
+        # Clean up CUDA context to prevent GPU state corruption from affecting
+        # the parent process. The training subprocess may have left GPU state
+        # that could cause segfaults in subsequent operations.
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.info("CUDA context cleaned after ObjectGS training")
+        except Exception as e:
+            logger.warning("CUDA cleanup failed: %s", e)
 
         # Skip mesh export: ObjectGS "reconstruct radiance fields" segfaults
         # and crashes the entire pipeline (GPU memory corruption propagates
