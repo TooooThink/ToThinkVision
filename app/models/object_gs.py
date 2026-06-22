@@ -552,30 +552,55 @@ class ObjectGSPipeline:
         # Patch hardcoded dataset paths in training scripts and configs
         self._patch_training_scripts(scene_dir, num_iterations=num_iterations)
 
-        # Run training
+        # Run training in a forked child process for crash isolation.
+        # If the training subprocess segfaults (GPU memory corruption),
+        # the forked child dies but the parent survives.
         script = "train_2d.sh" if use_2dgs else "train_3d.sh"
         script_path = self.repo_path / script
 
         if not script_path.exists():
             raise RuntimeError(f"ObjectGS training script not found: {script_path}")
 
-        try:
-            result = subprocess.run(
-                ["bash", str(script_path), str(data_dir)],
-                cwd=str(self.repo_path),
-                capture_output=True,
-                text=True,
-                timeout=7200,  # 2 hour timeout
-                env=_isolated_gpu_env(),
-            )
+        training_ok = False
+        training_error = ""
 
-            if result.returncode != 0:
-                raise RuntimeError(f"ObjectGS training failed: {result.stderr}")
+        pid = os.fork()
+        if pid == 0:
+            # Child process: run training and exit
+            try:
+                env = _isolated_gpu_env()
+                result = subprocess.run(
+                    ["bash", str(script_path), str(data_dir)],
+                    cwd=str(self.repo_path),
+                    capture_output=False,  # let output go to stdout/stderr
+                    timeout=7200,
+                    env=env,
+                )
+                os._exit(result.returncode)
+            except Exception:
+                os._exit(1)
+        else:
+            # Parent process: wait for child
+            import signal
+            _, status = os.waitpid(pid, 0)
+            if os.WIFEXITED(status):
+                exit_code = os.WEXITSTATUS(status)
+                if exit_code == 0:
+                    training_ok = True
+                else:
+                    training_error = f"ObjectGS training failed (exit {exit_code})"
+            elif os.WIFSIGNALED(status):
+                sig = os.WTERMSIG(status)
+                training_error = f"ObjectGS training killed by signal {sig} (likely segfault/OOM)"
 
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("ObjectGS training timed out")
-        except RuntimeError:
-            raise
+        if not training_ok:
+            logger.warning("ObjectGS training failed (non-fatal): %s", training_error)
+            # Return early - no trained model to export
+            return {
+                "scene_mesh": None,
+                "object_meshes": {},
+                "output_dir": output_dir,
+            }
 
         # Skip mesh export: ObjectGS "reconstruct radiance fields" segfaults
         # and crashes the entire pipeline (GPU memory corruption propagates
