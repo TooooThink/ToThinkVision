@@ -576,11 +576,17 @@ class ObjectGSPipeline:
             )
             stdout, _ = proc.communicate(timeout=7200)
 
-            if proc.returncode == 0:
+            # Check if model was actually saved (training may succeed but
+            # segfault during cleanup/exit, giving non-zero return code)
+            model_path = self._find_model_path(output_dir)
+            if model_path is not None:
+                training_ok = True
+                logger.info("ObjectGS training succeeded (model saved to %s)", model_path)
+            elif proc.returncode == 0:
                 training_ok = True
                 logger.info("ObjectGS training succeeded")
             else:
-                training_error = f"ObjectGS training failed (exit {proc.returncode})"
+                training_error = f"ObjectGS training failed (exit {proc.returncode}, no model found)"
                 if stdout:
                     logger.warning("Training output:\n%s", stdout.decode('utf-8', errors='replace')[-2000:])
 
