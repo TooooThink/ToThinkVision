@@ -562,15 +562,14 @@ class ObjectGSPipeline:
 
         try:
             env = _isolated_gpu_env()
-            proc = subprocess.Popen(
+            result = subprocess.run(
                 ["bash", str(script_path), str(data_dir)],
                 cwd=str(self.repo_path),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                capture_output=True,
+                text=True,
+                timeout=7200,
                 env=env,
-                start_new_session=True,  # new process group = better isolation
             )
-            stdout, _ = proc.communicate(timeout=7200)
 
             # Check if model was actually saved (training may succeed but
             # segfault during cleanup/exit, giving non-zero return code)
@@ -578,16 +577,15 @@ class ObjectGSPipeline:
             if model_path is not None:
                 training_ok = True
                 logger.info("ObjectGS training succeeded (model saved to %s)", model_path)
-            elif proc.returncode == 0:
+            elif result.returncode == 0:
                 training_ok = True
                 logger.info("ObjectGS training succeeded")
             else:
-                training_error = f"ObjectGS training failed (exit {proc.returncode}, no model found)"
-                if stdout:
-                    logger.warning("Training output:\n%s", stdout.decode('utf-8', errors='replace')[-2000:])
+                training_error = f"ObjectGS training failed (exit {result.returncode}, no model found)"
+                if result.stderr:
+                    logger.warning("Training stderr:\n%s", result.stderr[-2000:])
 
         except subprocess.TimeoutExpired:
-            proc.kill()
             training_error = "ObjectGS training timed out"
         except Exception as e:
             training_error = f"ObjectGS training exception: {e}"
