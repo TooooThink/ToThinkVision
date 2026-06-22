@@ -557,6 +557,17 @@ class ObjectGSPipeline:
         if not script_path.exists():
             raise RuntimeError(f"ObjectGS training script not found: {script_path}")
 
+        # Clean up CUDA state before launching training subprocess to prevent
+        # GPU state corruption from earlier pipeline steps (SAM3, VGGT, etc.)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.info("CUDA state cleaned before ObjectGS training")
+        except Exception as e:
+            logger.warning("Pre-training CUDA cleanup failed: %s", e)
+
         training_ok = False
         training_error = ""
 
