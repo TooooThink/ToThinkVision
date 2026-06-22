@@ -26,14 +26,10 @@ def _isolated_gpu_env() -> dict:
     """Build env dict for ObjectGS subprocesses.
 
     - Sets TORCH_CUDA_ARCH_LIST to A100 (sm_80) to avoid JIT compilation issues.
-    - Assigns export subprocesses to GPU 1 to isolate CUDA context.
-      If mesh export segfaults, GPU 0 (main pipeline) stays clean.
+    - No longer isolates to GPU 1 (process isolation via subprocess.Popen is sufficient).
     """
     env = os.environ.copy()
     env.setdefault("TORCH_CUDA_ARCH_LIST", "8.0")
-    import torch as _torch
-    if _torch.cuda.is_available() and _torch.cuda.device_count() > 1:
-        env["CUDA_VISIBLE_DEVICES"] = "1"
     return env
 
 
