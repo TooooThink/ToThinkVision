@@ -26,7 +26,7 @@ def _isolated_gpu_env() -> dict:
     """Build env dict for ObjectGS subprocesses.
 
     - Sets TORCH_CUDA_ARCH_LIST to A100 (sm_80) to avoid JIT compilation issues.
-    - No longer isolates to GPU 1 (process isolation via subprocess.Popen is sufficient).
+    - Does NOT import torch (which can trigger CUDA init on corrupted GPU state).
     """
     env = os.environ.copy()
     env.setdefault("TORCH_CUDA_ARCH_LIST", "8.0")
@@ -575,14 +575,14 @@ class ObjectGSPipeline:
             env = _isolated_gpu_env()
             print(f">>> Env built, about to launch subprocess: {script_path}", flush=True)
             print(f">>> data_dir: {data_dir}, repo_path: {self.repo_path}", flush=True)
+            print(f">>> About to launch subprocess", flush=True)
             result = subprocess.run(
                 ["bash", str(script_path), str(data_dir)],
                 cwd=str(self.repo_path),
-                capture_output=True,
-                text=True,
                 timeout=7200,
                 env=env,
             )
+            print(f">>> Subprocess returned: {result.returncode}", flush=True)
 
             # Check if model was actually saved (training may succeed but
             # segfault during cleanup/exit, giving non-zero return code)
