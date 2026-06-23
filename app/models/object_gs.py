@@ -401,6 +401,7 @@ class ObjectGSPipeline:
                 ">>> Patched source_path → '%s' in: %s",
                 abs_data_dir, ', '.join(patched_files),
             )
+            print(f">>> YAML patching complete, about to patch train.py", flush=True)
         else:
             logger.warning(
                 ">>> No YAML files with source_path found to patch"
@@ -411,7 +412,7 @@ class ObjectGSPipeline:
         # fewer than 11 cameras are reconstructed by COLMAP.
         # Replace `.copy()[10]` → `.copy()[0]` (always use first camera).
         # ------------------------------------------------------------------
-        logger.info(">>> About to patch train.py")
+        print(f">>> About to patch train.py at {repo / 'train.py'}", flush=True)
         train_py = repo / "train.py"
         if train_py.exists():
             try:
@@ -424,14 +425,14 @@ class ObjectGSPipeline:
                 )
                 if fixed != content:
                     train_py.write_text(fixed)
-                    logger.info("Patched train.py: hardcoded camera index → [0]")
+                    print(f">>> Patched train.py: hardcoded camera index → [0]", flush=True)
             except Exception as e:
-                logger.warning("Could not patch train.py camera index: %s", e)
+                print(f">>> Could not patch train.py: {e}", flush=True)
         else:
-            logger.warning("train.py not found at %s", train_py)
+            print(f">>> train.py not found at {train_py}", flush=True)
 
         # Copy patched files to ObjectGS repo
-        logger.info(">>> About to copy patched files")
+        print(f">>> About to copy patched files", flush=True)
         patches_dir = Path(__file__).parent / "objectgs_patches"
         import filecmp
         for patch_name, target_rel in [
@@ -440,15 +441,15 @@ class ObjectGSPipeline:
         ]:
             patched = patches_dir / patch_name
             target = repo / target_rel
-            logger.info(">>> Checking %s → %s", patched, target)
+            print(f">>> Checking {patched} → {target}", flush=True)
             if patched.exists() and target.exists():
                 if not filecmp.cmp(str(patched), str(target), shallow=False):
                     shutil.copy2(str(patched), str(target))
-                    logger.info("Copied patched %s → %s", patch_name, target)
+                    print(f">>> Copied patched {patch_name} → {target}", flush=True)
             else:
-                logger.warning("Patch file missing: patched=%s, target=%s", patched.exists(), target.exists())
+                print(f">>> Patch file missing: patched={patched.exists()}, target={target.exists()}", flush=True)
 
-        logger.info(">>> _patch_training_scripts() complete")
+        print(f">>> _patch_training_scripts() complete", flush=True)
 
     def train(
         self,
@@ -566,14 +567,14 @@ class ObjectGSPipeline:
         if not script_path.exists():
             raise RuntimeError(f"ObjectGS training script not found: {script_path}")
 
-        logger.info(">>> About to build env for ObjectGS training")
+        print(f">>> About to build env for ObjectGS training", flush=True)
         training_ok = False
         training_error = ""
 
         try:
             env = _isolated_gpu_env()
-            logger.info(">>> Env built, about to launch subprocess: %s", script_path)
-            logger.info(">>> data_dir: %s, repo_path: %s", data_dir, self.repo_path)
+            print(f">>> Env built, about to launch subprocess: {script_path}", flush=True)
+            print(f">>> data_dir: {data_dir}, repo_path: {self.repo_path}", flush=True)
             result = subprocess.run(
                 ["bash", str(script_path), str(data_dir)],
                 cwd=str(self.repo_path),
