@@ -411,6 +411,7 @@ class ObjectGSPipeline:
         # fewer than 11 cameras are reconstructed by COLMAP.
         # Replace `.copy()[10]` → `.copy()[0]` (always use first camera).
         # ------------------------------------------------------------------
+        logger.info(">>> About to patch train.py")
         train_py = repo / "train.py"
         if train_py.exists():
             try:
@@ -426,8 +427,11 @@ class ObjectGSPipeline:
                     logger.info("Patched train.py: hardcoded camera index → [0]")
             except Exception as e:
                 logger.warning("Could not patch train.py camera index: %s", e)
+        else:
+            logger.warning("train.py not found at %s", train_py)
 
         # Copy patched files to ObjectGS repo
+        logger.info(">>> About to copy patched files")
         patches_dir = Path(__file__).parent / "objectgs_patches"
         import filecmp
         for patch_name, target_rel in [
@@ -436,10 +440,15 @@ class ObjectGSPipeline:
         ]:
             patched = patches_dir / patch_name
             target = repo / target_rel
+            logger.info(">>> Checking %s → %s", patched, target)
             if patched.exists() and target.exists():
                 if not filecmp.cmp(str(patched), str(target), shallow=False):
                     shutil.copy2(str(patched), str(target))
                     logger.info("Copied patched %s → %s", patch_name, target)
+            else:
+                logger.warning("Patch file missing: patched=%s, target=%s", patched.exists(), target.exists())
+
+        logger.info(">>> _patch_training_scripts() complete")
 
     def train(
         self,
