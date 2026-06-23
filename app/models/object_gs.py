@@ -572,17 +572,20 @@ class ObjectGSPipeline:
         training_error = ""
 
         try:
-            env = _isolated_gpu_env()
-            print(f">>> Env built, about to launch subprocess: {script_path}", flush=True)
-            print(f">>> data_dir: {data_dir}, repo_path: {self.repo_path}", flush=True)
-            print(f">>> About to launch subprocess", flush=True)
-            result = subprocess.run(
-                ["bash", str(script_path), str(data_dir)],
-                cwd=str(self.repo_path),
-                timeout=7200,
-                env=env,
-            )
-            print(f">>> Subprocess returned: {result.returncode}", flush=True)
+            print(f">>> Building shell command for training", flush=True)
+            print(f">>> script_path: {script_path}, data_dir: {data_dir}", flush=True)
+            print(f">>> repo_path: {self.repo_path}", flush=True)
+
+            # Use os.system() instead of subprocess.run() to avoid segfault
+            # when parent process has corrupted CUDA state
+            cmd = f"cd {self.repo_path} && TORCH_CUDA_ARCH_LIST=8.0 bash {script_path} {data_dir}"
+            print(f">>> Running: {cmd}", flush=True)
+
+            # os.system() returns exit code shifted by 8 bits
+            raw_exit_code = os.system(cmd)
+            exit_code = raw_exit_code >> 8
+
+            print(f">>> Training exited with code: {exit_code}", flush=True)
 
             # Check if model was actually saved (training may succeed but
             # segfault during cleanup/exit, giving non-zero return code)
@@ -590,16 +593,12 @@ class ObjectGSPipeline:
             if model_path is not None:
                 training_ok = True
                 logger.info("ObjectGS training succeeded (model saved to %s)", model_path)
-            elif result.returncode == 0:
+            elif exit_code == 0:
                 training_ok = True
                 logger.info("ObjectGS training succeeded")
             else:
-                training_error = f"ObjectGS training failed (exit {result.returncode}, no model found)"
-                if result.stderr:
-                    logger.warning("Training stderr:\n%s", result.stderr[-2000:])
+                training_error = f"ObjectGS training failed (exit {exit_code}, no model found)"
 
-        except subprocess.TimeoutExpired:
-            training_error = "ObjectGS training timed out"
         except Exception as e:
             training_error = f"ObjectGS training exception: {e}"
 
