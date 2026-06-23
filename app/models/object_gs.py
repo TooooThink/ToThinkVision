@@ -557,11 +557,14 @@ class ObjectGSPipeline:
         if not script_path.exists():
             raise RuntimeError(f"ObjectGS training script not found: {script_path}")
 
+        logger.info(">>> About to build env for ObjectGS training")
         training_ok = False
         training_error = ""
 
         try:
             env = _isolated_gpu_env()
+            logger.info(">>> Env built, about to launch subprocess: %s", script_path)
+            logger.info(">>> data_dir: %s, repo_path: %s", data_dir, self.repo_path)
             result = subprocess.run(
                 ["bash", str(script_path), str(data_dir)],
                 cwd=str(self.repo_path),
