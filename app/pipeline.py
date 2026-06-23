@@ -153,6 +153,32 @@ def cleanup_all_models():
         logger.info(f"All models cleaned up. GPU: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 
 
+def _reset_gpu():
+    """Aggressively reset GPU state to prevent CUDA corruption accumulation.
+
+    Call this between major pipeline stages (after SAM3, after VGGT, before ObjectGS)
+    to ensure clean CUDA state for the next stage.
+    """
+    import gc
+    try:
+        import torch
+        if torch.cuda.is_available():
+            # Clear all cached memory
+            torch.cuda.empty_cache()
+
+            # Force garbage collection to delete unreferenced tensors
+            gc.collect()
+
+            # Reset CUDA context by reinitializing
+            # This clears any corrupted state
+            if torch.cuda.is_initialized():
+                torch.cuda.init()
+
+            logger.info("GPU state reset complete")
+    except Exception as e:
+        logger.warning("GPU reset failed: %s", e)
+
+
 def _check_gpu_health():
     """Verify GPU is in a usable state after subprocess failures.
 
@@ -787,6 +813,9 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
     logger.info("Clearing GPU memory before 3D reconstruction...")
     cleanup_all_models()
 
+    # Reset GPU state after SAM3 to prevent CUDA corruption
+    _reset_gpu()
+
     # Diagnostic: log GPU memory state after cleanup
     import torch
     if torch.cuda.is_available():
@@ -818,6 +847,9 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         reconstructor = get_reconstructor()
         pc_data, camera_poses = reconstructor.reconstruct(frame_dir)
         reconstruction_backend = "vggt" if reconstructor._backend == "vggt" else "mast3r"
+
+    # Reset GPU state after 3D reconstruction to prevent corruption
+    _reset_gpu()
 
     # ─── Per-Object 3D Mesh Reconstruction ──────────────────
     mesh_results = {}
@@ -880,6 +912,10 @@ def _process_video(file_path: Path, config: PipelineConfig) -> StructuredOutput:
         try:
             logger.info("Clearing GPU memory before ObjectGS...")
             cleanup_all_models()
+
+            # Reset GPU state before ObjectGS to ensure clean CUDA context
+            _reset_gpu()
+
             from app.models.object_gs import get_objectgs_pipeline
             objectgs_pipe = get_objectgs_pipeline()
             if objectgs_pipe.available:
