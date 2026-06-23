@@ -69,10 +69,9 @@ def clear_gpu_memory():
     import gc
     import torch
 
-    # Clear CUDA cache
+    # Clear CUDA cache (only use empty_cache, not synchronize which can segfault)
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-        torch.cuda.synchronize()
 
     # Force garbage collection
     gc.collect()
@@ -138,15 +137,13 @@ def cleanup_all_models():
     if hasattr(omniparser, '_omniparser'):
         omniparser._omniparser = None
 
-    # Clear GPU memory aggressively
+    # Clear GPU memory aggressively (only use empty_cache, not synchronize)
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-        torch.cuda.synchronize()
         # Multiple gc rounds to handle circular references
         gc.collect()
         gc.collect()
         torch.cuda.empty_cache()
-        torch.cuda.synchronize()
 
     gc.collect()
 
@@ -162,16 +159,19 @@ def _check_gpu_health():
     A subprocess segfault (e.g. Spann3R) can corrupt the shared CUDA context.
     This probes the GPU with a trivial allocation; if it fails, we force a
     CUDA context reset so downstream models don't inherit a broken state.
+
+    Note: Do NOT use torch.cuda.synchronize() here - it can segfault if the
+    CUDA context is corrupted. Only use torch.cuda.empty_cache() which is safe.
     """
     try:
         import torch
         if not torch.cuda.is_available():
             return
-        torch.cuda.synchronize()
+        # Clean up cached allocations (safe even if context is corrupted)
+        torch.cuda.empty_cache()
         # Tiny probe to verify CUDA context is intact
         _probe = torch.zeros(1, device='cuda')
         del _probe
-        torch.cuda.synchronize()
         logger.info("GPU health check passed")
     except Exception as e:
         logger.warning("GPU health check failed (%s), attempting CUDA context reset…", e)
@@ -182,7 +182,6 @@ def _check_gpu_health():
             # Re-initialize by allocating and freeing on device 0
             _init = torch.zeros(1, device='cuda')
             del _init
-            torch.cuda.synchronize()
             logger.info("CUDA context reset complete")
         except Exception as e2:
             logger.error("CUDA context reset failed: %s. Subsequent GPU stages may fail.", e2)
